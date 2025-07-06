@@ -1,0 +1,5 @@
+id: eth_wallet
+label: 'Ethereum Wallet'
+status: true
+method: real_aes
+key: wallet_encryption_key

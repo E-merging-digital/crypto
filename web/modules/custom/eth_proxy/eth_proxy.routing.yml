@@ -1,0 +1,8 @@
+# Routes for eth_proxy configuration
+eth_proxy.settings:
+  path: '/admin/config/web3/eth-proxy'
+  defaults:
+    _form: 'Drupal\eth_proxy\Form\EthProxySettingsForm'
+    _title: 'Configuration Ethereum Proxy'
+  requirements:
+    _permission: 'administer site configuration'

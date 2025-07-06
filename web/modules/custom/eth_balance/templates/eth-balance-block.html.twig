@@ -1,0 +1,24 @@
+{#
+/**
+ * @file
+ * Template pour afficher le solde ETH d’une adresse.
+ *
+ * Variables disponibles :
+ * - address  : L’adresse Ethereum (string).
+ * - balance  : Le solde initial en ETH (string).
+ * - endpoint : L’URL du endpoint JSON pour le polling.
+ */
+#}
+<div class="eth-balance-block">
+  <div class="eth-balance-block__address">
+    <strong>{{ 'Adresse :'|t }}</strong> {{ address|e }}
+  </div>
+  <div class="eth-balance-block__amount">
+    <strong>{{ 'Solde :'|t }}</strong>
+    <span
+      class="eth-balance-value"
+      data-endpoint="{{ endpoint }}"
+    >{{ balance }}</span>
+    ETH
+  </div>
+</div>

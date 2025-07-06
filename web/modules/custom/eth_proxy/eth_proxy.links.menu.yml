@@ -1,0 +1,7 @@
+eth_proxy.settings:
+  title: 'Ethereum Proxy'
+  description: 'Configuration du service Ethereum Proxy'
+  parent: system.admin_config_development
+  route_name: eth_proxy.settings
+  menu_name: main
+  weight: 100

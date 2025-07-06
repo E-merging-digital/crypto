@@ -1,0 +1,7 @@
+real_time_balance:
+  version: 1.x
+  js:
+    js/real_time_balance.js: {}    # plus de type: module ni d’attributes
+  dependencies:
+    - core/drupal
+    - core/once                # fournit la fonction globale once()

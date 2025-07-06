@@ -1,0 +1,7 @@
+name: 'Ethereum Transactions'
+type: module
+description: "Affichage des transactions d'adresse Ethereum."
+core_version_requirement: ^11
+package: Custom
+dependencies:
+  - eth_proxy

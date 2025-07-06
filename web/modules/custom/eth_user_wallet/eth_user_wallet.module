@@ -1,0 +1,22 @@
+<?php
+
+declare(strict_types=1);
+
+use Drupal\user\UserInterface;
+
+/**
+ * @file
+ * Hooks du module Ethereum User Wallet.
+ */
+
+/**
+ * Implements hook_user_login().
+ *
+ * Génère le wallet serveur à la première connexion (après confirmation d'e-mail).
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   L’utilisateur connecté.
+ */
+function eth_user_wallet_user_login(UserInterface $account): void {
+  \Drupal::service('eth_user_wallet.wallet_generator')->generate($account);
+}

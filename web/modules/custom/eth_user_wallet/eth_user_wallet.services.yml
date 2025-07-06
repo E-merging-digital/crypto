@@ -1,0 +1,6 @@
+services:
+  eth_user_wallet.wallet_generator:
+    class: Drupal\eth_user_wallet\WalletGenerator
+    arguments:
+      - '@encryption'
+      - '@entity_type.manager'

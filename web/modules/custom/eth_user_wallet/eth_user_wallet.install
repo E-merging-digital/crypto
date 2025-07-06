@@ -1,0 +1,75 @@
+<?php
+
+declare(strict_types=1);
+
+use Drupal\encrypt\Entity\EncryptionProfile;
+use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\field\Entity\FieldConfig;
+
+/**
+ * Implements hook_install().
+ */
+function eth_user_wallet_install(): void {
+  // -- Création des champs utilisateur (inchangé) --
+  $fields = [
+    'field_eth_address'             => ['type' => 'string',    'label' => 'Adresse Ethereum'],
+    'field_eth_mnemonic'            => ['type' => 'text_long', 'label' => 'Phrase mnémonique (BIP39)'],
+    'field_eth_ciphertext_server'   => ['type' => 'text_long', 'label' => 'Clé privée chiffrée (serveur)'],
+    'field_eth_ciphertext_user'     => ['type' => 'text_long', 'label' => 'Clé privée chiffrée (utilisateur)'],
+    'field_eth_user_salt'           => ['type' => 'string',    'label' => 'Salt utilisateur'],
+  ];
+  foreach ($fields as $name => $info) {
+    if (!FieldStorageConfig::loadByName('user', $name)) {
+      $storage = FieldStorageConfig::create([
+        'field_name'  => $name,
+        'entity_type' => 'user',
+        'type'        => $info['type'],
+        'cardinality' => 1,
+      ]);
+      $storage->save();
+      FieldConfig::create([
+        'field_storage' => $storage,
+        'bundle'        => 'user',
+        'label'         => $info['label'],
+      ])->save();
+    }
+  }
+
+  // -- Création du profil d’encryption eth_wallet si manquant --
+  // Attention : la clé 'your_key_id_here' doit exister (module Key).
+  if (!EncryptionProfile::load('eth_wallet')) {
+    EncryptionProfile::create([
+      'id'     => 'eth_wallet',
+      'label'  => 'Ethereum Wallet',
+      'status' => TRUE,
+      'method' => 'real_aes',
+      'key'    => 'your_key_id_here',
+    ])->save();
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function eth_user_wallet_uninstall(): void {
+  // Suppression des champs (inchangé)…
+  $fields = [
+    'field_eth_address',
+    'field_eth_mnemonic',
+    'field_eth_ciphertext_server',
+    'field_eth_ciphertext_user',
+    'field_eth_user_salt',
+  ];
+  foreach ($fields as $name) {
+    if ($cfg = FieldConfig::loadByName('user', 'user', $name)) {
+      $cfg->delete();
+    }
+    if ($st = FieldStorageConfig::loadByName('user', $name)) {
+      $st->delete();
+    }
+  }
+  // Suppression du profil d’encryption s’il existe.
+  if ($profile = EncryptionProfile::load('eth_wallet')) {
+    $profile->delete();
+  }
+}

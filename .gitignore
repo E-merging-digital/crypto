@@ -1,0 +1,27 @@
+# Ignorer les dépendances gérées par Composer
+/vendor/
+
+# Ignorer Drupal core (installé dans web/core via Composer)
+# et tout code contrib (modules, thèmes, profils)
+/web/core/
+/web/modules/contrib/
+/web/themes/contrib/
+/web/profiles/contrib/
+/web/libraries/
+
+# Ignorer les fichiers de configuration sensibles et générés
+/web/sites/*/settings.php
+/web/sites/*/settings.local.php
+
+# Ignorer le répertoire de fichiers utilisateur
+/web/sites/*/files/
+
+# Ignorer l’environnement de test SimpleTest
+/web/sites/simpletest/
+
+# Ignorer le .gitignore généré par DDEV (ne pas versionner)
+/.ddev/.gitignore
+
+# Ignorer les fichiers PhpStorm
+/.idea/
+/*.iml

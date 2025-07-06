@@ -1,0 +1,7 @@
+services:
+  eth_proxy.rpc:
+    class: Drupal\eth_proxy\Service\EthProxyService
+    arguments:
+      - '@config.factory'
+      - '@http_client'
+    tags: []

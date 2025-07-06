@@ -1,0 +1,6 @@
+name: 'SignUp Link'
+type: module
+description: 'Adds a "Sign up" link next to the login form and in the user account menu for anonymous visitors.'
+package: Custom
+core_version_requirement: ^11.1
+version: 1.0.0

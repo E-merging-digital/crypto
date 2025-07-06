@@ -1,0 +1,12 @@
+name: 'Ethereum User Wallet'
+type: module
+description: >
+  Génère un wallet Ethereum à la première connexion (post-confirmation e-mail),
+  stocke la clé privée chiffrée (serveur + utilisateur), et permet à l’utilisateur
+  de définir un passphrase ou utiliser Google OAuth pour la déchiffrer.
+package: Custom
+core_version_requirement: ^11
+dependencies:
+  - encrypt
+  - key
+  - social_auth_google

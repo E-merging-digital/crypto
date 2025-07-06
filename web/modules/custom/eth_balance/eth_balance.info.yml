@@ -1,0 +1,7 @@
+name: 'Ethereum Balance'
+type: module
+description: 'Affichage du solde pour une adresse Ethereum.'
+core_version_requirement: ^11
+package: Custom
+dependencies:
+  - eth_proxy

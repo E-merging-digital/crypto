@@ -1,0 +1,42 @@
+# Formulaire pour définir le passphrase
+eth_user_wallet.set_passphrase:
+  path: '/user/{user}/wallet/passphrase'
+  defaults:
+    _form: '\Drupal\eth_user_wallet\Form\SetWalletPassphraseForm'
+    _title: 'Définir mon passphrase Ethereum'
+  requirements:
+    _user_is_logged_in: 'TRUE'
+    _entity_access: 'user.update'
+  options:
+    parameters:
+      user:
+        type: entity:user
+
+# Formulaire de déchiffrement
+eth_user_wallet.decrypt_wallet:
+  path: '/user/{user}/wallet/decrypt'
+  defaults:
+    _form: '\Drupal\eth_user_wallet\Form\DecryptWalletForm'
+    _title: 'Accéder à mon wallet Ethereum'
+  requirements:
+    _user_is_logged_in: 'TRUE'
+    _entity_access: 'user.update'
+  options:
+    parameters:
+      user:
+        type: entity:user
+
+# Dashboard (adresse + solde, après déchiffrement)
+eth_user_wallet.dashboard:
+  path: '/user/{user}/dashboard'
+  defaults:
+    _controller: '\Drupal\eth_user_wallet\Controller\DashboardController::dashboard'
+    _title: 'Mon dashboard Ethereum'
+  requirements:
+    _user_is_logged_in: 'TRUE'
+    _entity_access: 'user.update'
+  options:
+    parameters:
+      user:
+        type: entity:user
+

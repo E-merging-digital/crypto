@@ -1,0 +1,15 @@
+eth_balance.json:
+  path: '/api/eth/balance/{address}'
+  defaults:
+    _controller: 'Drupal\eth_balance\Controller\EthBalanceController::balance'
+  requirements:
+    _access: 'TRUE'
+  options:
+    _format: 'json'
+eth_balance.balance:
+  path: '/eth-balance/{address}/balance'
+  defaults:
+    _controller: '\Drupal\eth_balance\Controller\EthBalanceController::balance'
+    _format: 'json'
+  requirements:
+    _permission: 'access content'

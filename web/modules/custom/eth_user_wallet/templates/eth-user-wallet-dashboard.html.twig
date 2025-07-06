@@ -1,0 +1,25 @@
+{#
+/**
+ * @file
+ * Dashboard Ethereum pour l'utilisateur.
+ *
+ * Variables :
+ * - address : adresse publique.
+ * - balance : solde en ETH.
+ */
+#}
+<div class="eth-user-wallet-dashboard">
+  <h2>{{ 'Mon Dashboard Ethereum'|t }}</h2>
+  <p><strong>{{ 'Adresse :'|t }}</strong> {{ address }}</p>
+  <p><strong>{{ 'Solde :'|t }}</strong> {{ balance }} ETH</p>
+  {% if private %}
+    <h3>{{ 'Votre clé privée'|t }}</h3>
+    <pre>{{ private }}</pre>
+    <h3>{{ 'Votre phrase mnémonique'|t }}</h3>
+    <pre>{{ mnemonic }}</pre>
+  {% else %}
+    <p><a href="{{ path('eth_user_wallet.decrypt_wallet', {'user': user.id}) }}">
+        {{ 'Cliquez pour déchiffrer votre wallet'|t }}
+      </a></p>
+  {% endif %}
+</div>

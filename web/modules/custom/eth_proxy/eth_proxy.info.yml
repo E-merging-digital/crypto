@@ -1,0 +1,6 @@
+name: 'Ethereum Proxy'
+type: module
+description: 'Service centralisé pour les interactions JSON-RPC avec un nœud Ethereum.'
+core_version_requirement: ^11
+package: Custom
+dependencies: []

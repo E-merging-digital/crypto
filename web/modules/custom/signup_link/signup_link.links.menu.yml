@@ -1,0 +1,6 @@
+signup_link.register:
+  title: 'Sign up'
+  description: 'Sign up for a new account'
+  route_name: user.register
+  menu_name: account
+  weight: 100
