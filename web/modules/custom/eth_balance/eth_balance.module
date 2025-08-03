@@ -14,7 +14,8 @@ function eth_balance_theme($existing, $type, $theme, $path) {
       'variables' => [
         'address'  => NULL,
         'balance'  => NULL,
-        'endpoint' => NULL,        // ← on l’ajoute ici
+  // ← on l’ajoute ici
+        'endpoint' => NULL,
       ],
       'template' => 'eth-balance-block',
       'path'     => $path . '/templates',
