@@ -16,8 +16,8 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'                      # Drupal 11 supporte PHP 8.3
-          coverage: none                          # désactive Xdebug pour perf. :contentReference[oaicite:0]{index=0}
+          php-version: '8.3'
+          coverage: none
           extensions: xml, gd, mysqli, zip
           tools: composer
 
@@ -38,7 +38,9 @@ jobs:
         run: |
           mkdir -p web/sites/simpletest/browser_output
           chmod -R 775 web/sites/simpletest
-        # éviter l'erreur de dossier manquant ou non inscriptible pour BrowserTestBase. :contentReference[oaicite:1]{index=1}
+
+      - name: Ensure run-tests.sh is executable
+        run: chmod +x scripts/run-tests.sh
 
       - name: Run GrumPHP (lint + static analysis + PHPUnit)
         env:
@@ -47,7 +49,6 @@ jobs:
           BROWSERTEST_OUTPUT_DIRECTORY: web/sites/simpletest/browser_output
         run: |
           vendor/bin/grumphp run
-        # On centralise validation, phpstan/phpcs/phpunit via GrumPHP. :contentReference[oaicite:2]{index=2}
 
   behat:
     name: Behat end-to-end tests
@@ -64,7 +65,6 @@ jobs:
 
       - name: Setup Behat extensions
         run: |
-          # Il est préférable de déclarer ces dépendances en dev dans composer.json pour éviter de les installer dynamiquement à chaque run.
           composer require --dev behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
 
       - name: Run Behat
