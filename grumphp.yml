@@ -1,0 +1,26 @@
+# grumphp.yml
+grumphp:
+  git_hook_variables:
+    EXEC_GRUMPHP_COMMAND: ddev exec
+  stop_on_failure: true
+  process_timeout: 300
+
+  tasks:
+    phpcs:
+      standard: [Drupal, DrupalPractice]
+      triggered_by: ['php', 'module', 'inc', 'install', 'test', 'profile', 'theme']
+      ignore_patterns:
+        - web/core/*
+        - web/vendor/*
+    twigcs: ~
+    phpstan:
+      configuration: phpstan.neon
+      memory_limit: "2G"
+    shell:
+      scripts:
+        - ["-c", "./scripts/run-tests.sh"]
+
+    # optionnel : si vous avez un phpunit.xml.dist et voulez la tâche native à côté
+    # phpunit:
+    #   testsuite: grumphp
+    #   config_file: web/phpunit.xml.dist

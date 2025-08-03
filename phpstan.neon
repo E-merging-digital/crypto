@@ -1,0 +1,19 @@
+parameters:
+  level: 0
+  paths:
+    - web/modules/custom
+    - web/themes/custom
+  fileExtensions:
+    - php
+    - module
+    - inc
+    - install
+    - test
+    - profile
+    - theme
+  excludePaths:
+    - */vendor/*
+    - *node_modules/*
+  ignoreErrors:
+    - '#^Unsafe usage of new static#'
+  reportUnmatchedIgnoredErrors: false

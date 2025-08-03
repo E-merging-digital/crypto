@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         bootstrap="web/core/tests/bootstrap.php"
+         colors="true"
+         beStrictAboutTestsThatDoNotTestAnything="true"
+         beStrictAboutOutputDuringTests="true"
+         beStrictAboutChangesToGlobalState="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         displayDetailsOnTestsThatTriggerErrors="true"
+         displayDetailsOnTestsThatTriggerWarnings="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true"
+         cacheResult="false"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.5/phpunit.xsd"
+         cacheDirectory=".phpunit.cache">
+  <php>
+    <ini name="error_reporting" value="32767"/>
+    <ini name="memory_limit" value="-1"/>
+    <!-- Ajustez cette URL selon celle de votre environnement DDEV (ex: http://crypto.ddev.site) -->
+    <env name="SIMPLETEST_BASE_URL" value="http://127.0.0.1:8080"/>
+    <env name="SIMPLETEST_DB" value="sqlite://localhost/web/sites/default/files/.ht.sqlite"/>
+    <env name="BROWSERTEST_OUTPUT_BASE_URL" value=""/>
+  </php>
+
+  <testsuites>
+    <testsuite name="custom-modules">
+      <!-- Tous les tests (unitaires / kernel / fonctionnels) de modules custom -->
+      <directory>web/modules/custom/*/tests/src</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>

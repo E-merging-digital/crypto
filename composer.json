@@ -14,11 +14,7 @@
             "url": "https://packages.drupal.org/8"
         }
     ],
-    "provide": {
-        "composer/semver": "1.4.0"
-    },
     "require": {
-        "bitwasp/bitcoin": "1.0",
         "composer/installers": "^2.3",
         "drupal/admin_toolbar": "^3.6",
         "drupal/bootstrap5": "^4.0",
@@ -31,8 +27,17 @@
         "drupal/real_aes": "^2.6",
         "drupal/social_auth_google": "^4.0",
         "drush/drush": "^13.6",
-        "mdanter/ecc": "0.5",
-        "web3p/ethereum-wallet": "0.1.0"
+        "mdanter/ecc": "0.5"
+    },
+    "require-dev": {
+        "drupal/coder": "^8.3",
+        "drupal/core-dev": "11.2",
+        "friendsoftwig/twigcs": "^6.5",
+        "mglaman/phpstan-drupal": "^2.0",
+        "phpro/grumphp": "^2.14",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan": "^2.0",
+        "phpstan/phpstan-deprecation-rules": "^2.0"
     },
     "conflict": {
         "drupal/drupal": "*"
@@ -42,17 +47,24 @@
     "config": {
         "allow-plugins": {
             "composer/installers": true,
-            "drupal/core-composer-scaffold": true,
-            "drupal/core-recipe-unpack": true,
-            "drupal/core-project-message": true,
-            "phpstan/extension-installer": true,
             "dealerdirect/phpcodesniffer-composer-installer": true,
+            "drupal/core-composer-scaffold": true,
+            "drupal/core-project-message": true,
+            "drupal/core-recipe-unpack": true,
             "php-http/discovery": true,
-            "php-tuf/composer-integration": true
+            "php-tuf/composer-integration": true,
+            "phpro/grumphp": true,
+            "phpstan/extension-installer": true,
+            "tbachert/spi": true
         },
         "sort-packages": true
     },
     "extra": {
+        "patches": {
+            "bitwasp/bitcoin": {
+                "Allow lastguest v2.0.1": "https://github.com/Bit-Wasp/bitcoin-php/pull/876.patch"
+            }
+        },
         "drupal-scaffold": {
             "locations": {
                 "web-root": "web/"
@@ -111,5 +123,21 @@
                 "      composer remove drupal/core-project-message"
             ]
         }
+    },
+    "scripts": {
+        "post-install-cmd": [
+            "@vendor/bin/phpcs --config-set installed_paths vendor/drupal/coder/coder_sniffer"
+        ],
+        "post-update-cmd": [
+            "@vendor/bin/phpcs --config-set installed_paths vendor/drupal/coder/coder_sniffer"
+        ],
+        "drupal:validate": [
+            "@vendor/bin/phpcs --standard=Drupal,DrupalPractice --extensions=php,module,inc,install,test,profile,theme --cache=.phpcs-cache web/modules/custom web/themes/custom",
+            "@vendor/bin/twigcs web",
+            "@vendor/bin/phpstan analyse -l 0 --memory-limit=1G"
+        ],
+        "drupal:test": [
+            "bash scripts/run-tests.sh"
+        ]
     }
 }
