@@ -1,5 +1,9 @@
 <?php
 
+/**
+ * @file
+ */
+
 declare(strict_types=1);
 
 use Drupal\encrypt\Entity\EncryptionProfile;
@@ -12,11 +16,11 @@ use Drupal\field\Entity\FieldConfig;
 function eth_user_wallet_install(): void {
   // -- Création des champs utilisateur (inchangé) --
   $fields = [
-    'field_eth_address'             => ['type' => 'string',    'label' => 'Adresse Ethereum'],
+    'field_eth_address'             => ['type' => 'string', 'label' => 'Adresse Ethereum'],
     'field_eth_mnemonic'            => ['type' => 'text_long', 'label' => 'Phrase mnémonique (BIP39)'],
     'field_eth_ciphertext_server'   => ['type' => 'text_long', 'label' => 'Clé privée chiffrée (serveur)'],
     'field_eth_ciphertext_user'     => ['type' => 'text_long', 'label' => 'Clé privée chiffrée (utilisateur)'],
-    'field_eth_user_salt'           => ['type' => 'string',    'label' => 'Salt utilisateur'],
+    'field_eth_user_salt'           => ['type' => 'string', 'label' => 'Salt utilisateur'],
   ];
   foreach ($fields as $name => $info) {
     if (!FieldStorageConfig::loadByName('user', $name)) {
@@ -52,7 +56,7 @@ function eth_user_wallet_install(): void {
  * Implements hook_uninstall().
  */
 function eth_user_wallet_uninstall(): void {
-  // Suppression des champs (inchangé)…
+  // Suppression des champs (inchangé)….
   $fields = [
     'field_eth_address',
     'field_eth_mnemonic',
