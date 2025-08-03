@@ -28,7 +28,7 @@ final class WalletGenerator {
    */
   public function __construct(
     EncryptServiceInterface $encrypt_service,
-    EntityTypeManagerInterface $entity_type_manager
+    EntityTypeManagerInterface $entity_type_manager,
   ) {
     $this->encryptService    = $encrypt_service;
     $this->entityTypeManager = $entity_type_manager;
@@ -65,11 +65,11 @@ final class WalletGenerator {
 
     // 3) Stockage.
     $account
-      ->set('field_eth_address',           $address)
-      ->set('field_eth_mnemonic',          $mnemonic)
+      ->set('field_eth_address', $address)
+      ->set('field_eth_mnemonic', $mnemonic)
       ->set('field_eth_ciphertext_server', $cipher)
-      ->set('field_eth_ciphertext_user',   '')
-      ->set('field_eth_user_salt',         '');
+      ->set('field_eth_ciphertext_user', '')
+      ->set('field_eth_user_salt', '');
     $this->entityTypeManager->getStorage('user')->save($account);
   }
 
