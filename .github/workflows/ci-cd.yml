@@ -1,4 +1,5 @@
 name: CI/CD Drupal 11 – crypto
+
 on:
   push:
     branches: [ main ]
@@ -6,54 +7,79 @@ on:
     branches: [ main ]
 
 jobs:
-  phpunit:
+  phpunit-and-lint:
     name: PhpUnit & lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: PHP & Composer
+      - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'                        # Drupal 11 support PHP 8.3
-          coverage: none
-          tools: composer
+          php-version: '8.3'                      # Drupal 11 supporte PHP 8.3
+          coverage: none                          # désactive Xdebug pour perf. :contentReference[oaicite:0]{index=0}
           extensions: xml, gd, mysqli, zip
+          tools: composer
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.composer/cache
+            vendor
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
 
       - name: Install project dependencies
+        run: composer install --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Prepare Drupal test output directories
+        run: |
+          mkdir -p web/sites/simpletest/browser_output
+          chmod -R 775 web/sites/simpletest
+        # éviter l'erreur de dossier manquant ou non inscriptible pour BrowserTestBase. :contentReference[oaicite:1]{index=1}
+
+      - name: Run GrumPHP (lint + static analysis + PHPUnit)
+        env:
+          SIMPLETEST_BASE_URL: http://127.0.0.1:8080
+          SIMPLETEST_DB: sqlite://localhost/web/sites/default/files/.ht.sqlite
+          BROWSERTEST_OUTPUT_DIRECTORY: web/sites/simpletest/browser_output
+        run: |
+          vendor/bin/grumphp run
+        # On centralise validation, phpstan/phpcs/phpunit via GrumPHP. :contentReference[oaicite:2]{index=2}
+
+  behat:
+    name: Behat end-to-end tests
+    runs-on: ubuntu-latest
+    needs: phpunit-and-lint
+    container:
+      image: drupalci/drupalci:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies for Behat
         run: |
           composer install --prefer-dist --no-interaction --optimize-autoloader
 
-      - name: PHPStan + Code Style
+      - name: Setup Behat extensions
         run: |
-          composer drupal:validate
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run PHPUnit
-        run: |
-          cd web/sites/simpletest && ../../../vendor/bin/phpunit
-
-  behat:
-    name: Behat end-to‑end tests
-    runs-on: ubuntu-latest
-    needs: phpunit
-    container:
-      image: drupalci/drupalci:latest          # contain dependencies for Behat
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Behat
-        run: |
+          # Il est préférable de déclarer ces dépendances en dev dans composer.json pour éviter de les installer dynamiquement à chaque run.
           composer require --dev behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
-          cd web && behat --colors --out formats
+
+      - name: Run Behat
+        working-directory: web
+        run: |
+          behat --colors --out formats
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
     runs-on: ubuntu-latest
-    needs: [ phpunit, behat ]
+    needs: [ phpunit-and-lint, behat ]
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up SSH for private deploy
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -83,7 +109,6 @@ jobs:
 
       - name: Run Drush post-deploy
         run: |
-          ssh ${{ secrets.PROD_SSH }} "cd web && vendor/bin/drush cim -y && drush updb -y && drush cr"
+          ssh ${{ secrets.PROD_SSH }} "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
         env:
           PROD_SSH: ${{ secrets.PROD_SSH }}
-
