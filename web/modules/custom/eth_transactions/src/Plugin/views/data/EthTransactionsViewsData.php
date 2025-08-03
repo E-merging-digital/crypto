@@ -2,15 +2,11 @@
 
 namespace Drupal\eth_transactions\Plugin\views\data;
 
-use Drupal\views\Entity\ViewsData;
+use Drupal\views\EntityViewsData;
 
 /**
- * Fournit la définition des données pour Views.
+ * Provides views data for eth_transactions module.
  */
-class EthTransactionsViewsData extends ViewsData {
-  public function getData() {
-    $data = [];
-    // TODO: définir les champs pour Views.
-    return $data;
-  }
+final class EthTransactionsViewsData extends EntityViewsData {
+  // Extension point: adapter pour customisations futures de ViewsData.
 }

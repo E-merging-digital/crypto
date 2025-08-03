@@ -1,82 +1,68 @@
 <?php
 
-/**
- * @file
- * Provides hook implementations for the signup_link module.
- *
- * @package Drupal\signup_link
- */
-
-declare(strict_types=1);
-
 namespace Drupal\signup_link\Hook;
 
-use Drupal\Core\Hook\Attribute\Hook;
 use Drupal\Core\Session\AccountProxyInterface;
-use Drupal\Core\Menu\MenuLinkTreeElement;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
 
 /**
- * Implements hooks to rename the login block link and conditionally hide the
- * signup menu link for authenticated users.
- *
- * @ingroup signup_link
+ * Service pour altérer l'interface de connexion et le menu compte.
  */
-class SignUpLinkHooks {
+final class SignUpLinkHooks {
+  use StringTranslationTrait;
 
   /**
-   * The current user service.
+   * Current user proxy.
    *
    * @var \Drupal\Core\Session\AccountProxyInterface
    */
-  protected AccountProxyInterface $currentUser;
+  private AccountProxyInterface $currentUser;
 
   /**
-   * Constructs a new SignUpLinkHooks instance.
+   * Constructs the helper.
    *
    * @param \Drupal\Core\Session\AccountProxyInterface $current_user
-   *   The current user service.
+   *   Current user.
+   * @param \Drupal\Core\StringTranslation\TranslationInterface $translator
+   *   String translation service.
    */
-  public function __construct(AccountProxyInterface $current_user) {
+  public function __construct(AccountProxyInterface $current_user, $translator) {
     $this->currentUser = $current_user;
+    $this->stringTranslation = $translator;
   }
 
   /**
-   * Alters the user login block to rename the "create account" link.
+   * Modifie le lien de création de compte dans le bloc de connexion.
    *
-   * Implements hook_preprocess_block().
-   *
-   * @param array $variables
-   *   Renderable array of block variables.
+   * @param array &$variables
+   *   Variables du preprocess.
    */
-  #[Hook('preprocess_block')]
   public function preprocessBlock(array &$variables): void {
     if ($variables['plugin_id'] !== 'system_user_login_block' || !$this->currentUser->isAnonymous()) {
       return;
     }
     if (isset($variables['content']['user_links']['#items']['create_account'])) {
-      $variables['content']['user_links']['#items']['create_account']['#title'] = t('Sign up');
+      $variables['content']['user_links']['#items']['create_account']['#title'] = $this->t('Sign up');
     }
   }
 
   /**
-   * Removes the "Sign up" menu link for authenticated users.
+   * Supprime le lien "S’inscrire" pour les utilisateurs authentifiés.
    *
-   * Implements hook_menu_tree_alter().
-   *
-   * @param \Drupal\Core\Menu\MenuLinkTreeElement[] $tree
-   *   The menu tree elements.
+   * @param array &$tree
+   *   Arbre du menu.
    * @param string $menu_name
-   *   The machine name of the menu being rendered.
+   *   Nom du menu.
    */
-  #[Hook('menu_tree_alter')]
   public function alterAccountMenu(array &$tree, string $menu_name): void {
     if ($menu_name !== 'account' || $this->currentUser->isAnonymous()) {
       return;
     }
     foreach ($tree as $key => $element) {
-      if ($element->link->getRouteName() === 'user.register') {
+      if (isset($element->link) && $element->link->getRouteName() === 'user.register') {
         unset($tree[$key]);
       }
     }
   }
+
 }

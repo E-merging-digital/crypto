@@ -1,14 +1,38 @@
 <?php
+
 namespace Drupal\eth_proxy\Service;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
-use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\ClientInterface;
 
-class EthProxyService {
-  protected ConfigFactoryInterface $configFactory;
-  protected ClientInterface $httpClient;
+/**
+ * Service to proxy JSON-RPC calls to an Ethereum node.
+ */
+final class EthProxyService {
 
+  /**
+   * Configuration factory.
+   *
+   * @var \Drupal\Core\Config\ConfigFactoryInterface
+   */
+  private ConfigFactoryInterface $configFactory;
+
+  /**
+   * HTTP client.
+   *
+   * @var \GuzzleHttp\ClientInterface
+   */
+  private ClientInterface $httpClient;
+
+  /**
+   * Constructs the service.
+   *
+   * @param \Drupal\Core\Config\ConfigFactoryInterface $config_factory
+   *   Configuration factory.
+   * @param \GuzzleHttp\ClientInterface $http_client
+   *   HTTP client.
+   */
   public function __construct(ConfigFactoryInterface $config_factory, ClientInterface $http_client) {
     $this->configFactory = $config_factory;
     $this->httpClient = $http_client;
@@ -22,25 +46,26 @@ class EthProxyService {
    * @param array $params
    *   Parameters array.
    *
-   * @return array|string  Tableau pour les méthodes retournant des listes JSON-RPC, ou chaîne hexadécimale pour les balances
-   *   RPC response as associative array.
+   * @return array|string
+   *   RPC response as associative array, or hex string for balances.
    *
-   * @throws \Exception
+   * @throws \RuntimeException
+   *   If the request fails or the RPC returns an error.
    */
   public function request(string $method, array $params = []): array|string {
     $config = $this->configFactory->get('eth_proxy.settings');
     $url = $config->get('node_url');
-    $jwt = trim($config->get('jwt_token'));
+    $jwt = trim((string) $config->get('jwt_token'));
 
     $payload = [
       'jsonrpc' => '2.0',
-      'id' => uniqid(),
+      'id' => uniqid('', TRUE),
       'method' => $method,
       'params' => $params,
     ];
 
     $options = ['json' => $payload];
-    if (!empty($jwt)) {
+    if ($jwt !== '') {
       $options['headers']['Authorization'] = 'Bearer ' . $jwt;
     }
 
@@ -48,12 +73,13 @@ class EthProxyService {
       $response = $this->httpClient->request('POST', $url, $options);
       $data = json_decode($response->getBody()->__toString(), TRUE);
       if (isset($data['error'])) {
-        throw new \Exception('RPC Error: ' . $data['error']['message']);
+        throw new \RuntimeException('RPC Error: ' . ($data['error']['message'] ?? 'Unknown'));
       }
-      return $data['result'];
+      return $data['result'] ?? '';
     }
     catch (GuzzleException $e) {
-      throw new \Exception('HTTP Error: ' . $e->getMessage());
+      throw new \RuntimeException('HTTP Error: ' . $e->getMessage(), 0, $e);
     }
   }
+
 }

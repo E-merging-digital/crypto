@@ -1,85 +1,51 @@
 <?php
 
-declare(strict_types=1);
-
 namespace Drupal\eth_user_wallet\Controller;
 
 use Drupal\Core\Controller\ControllerBase;
-use Drupal\user\UserInterface;
+use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Symfony\Component\DependencyInjection\ContainerInterface;
-use Drupal\eth_proxy\Service\EthProxyService;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Controller du dashboard Ethereum.
+ * Dashboard controller for eth_user_wallet.
  */
-class DashboardController extends ControllerBase {
-
-  private EthProxyService $ethProxy;
+final class DashboardController extends ControllerBase {
 
   /**
-   * Constructeur.
+   * Temp store factory.
    *
-   * @param \Drupal\eth_proxy\Service\EthProxyService $eth_proxy
-   *   Service JSON-RPC Ethereum.
+   * @var \Drupal\Core\TempStore\PrivateTempStoreFactory
    */
-  public function __construct(EthProxyService $eth_proxy) {
-    $this->ethProxy = $eth_proxy;
+  private PrivateTempStoreFactory $tempStoreFactory;
+
+  /**
+   * Constructs the controller.
+   *
+   * @param \Drupal\Core\TempStore\PrivateTempStoreFactory $temp_store_factory
+   *   Temp store factory.
+   */
+  public function __construct(PrivateTempStoreFactory $temp_store_factory) {
+    $this->tempStoreFactory = $temp_store_factory;
   }
 
   /**
    * {@inheritdoc}
    */
-  public static function create(ContainerInterface $container): self {
-    return new static($container->get('eth_proxy.rpc'));
+  public static function create(ContainerInterface $container): static {
+    return new static(
+      $container->get('user.private_tempstore')
+    );
   }
 
   /**
-   * Affiche le dashboard.
-   *
-   * @param \Drupal\user\UserInterface $user
-   *   L’utilisateur cible.
-   *
-   * @return array
-   *   Render array.
-   *
-   * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
+   * Example dashboard.
    */
-  public function dashboard(UserInterface $user): array {
-    if ($this->currentUser()->id() !== $user->id()) {
-      throw $this->createAccessDeniedException();
-    }
+  public function dashboard(): Response {
+    $store = $this->tempStoreFactory->get('eth_user_wallet');
+    $value = $store->get('some_key') ?? 'default';
 
-    $address = $user->get('field_eth_address')->value;
-    $raw     = $this->ethProxy->request('eth_getBalance', [$address, 'latest']);
-    $hex     = is_array($raw) && isset($raw['result']) ? $raw['result'] : (string) $raw;
-    $hexVal  = preg_replace('/^0x/i', '', $hex);
-
-    // hex→dec→ETH
-    $wei = $this->hexToDec($hexVal);
-    $eth = bcdiv($wei, bcpow('10','18',0), 18);
-
-    // Clé privée/mnemonic déchiffrés
-    $private   = $this->tempStoreFactory()->get('eth_user_wallet')->get('decrypted_private') ?? '';
-    $mnemonic  = $private ? $user->get('field_eth_mnemonic')->value : '';
-
-    return [
-      '#theme'    => 'eth_user_wallet_dashboard',
-      '#address'  => $address,
-      '#balance'  => $eth,
-      '#mnemonic' => $mnemonic,
-      '#private'  => $private,
-    ];
-  }
-
-  /**
-   * Convertit une hex string en décimal via BCMath.
-   */
-  private function hexToDec(string $hex): string {
-    $dec = '0';
-    foreach (str_split($hex) as $c) {
-      $dec = bcadd(bcmul($dec, '16', 0), (string) hexdec($c), 0);
-    }
-    return $dec;
+    return new Response(sprintf('Dashboard value: %s', $value));
   }
 
 }

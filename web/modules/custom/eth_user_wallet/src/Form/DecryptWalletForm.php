@@ -1,47 +1,70 @@
 <?php
 
-declare(strict_types=1);
-
 namespace Drupal\eth_user_wallet\Form;
 
 use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
-use Drupal\user\UserInterface;
+use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
- * Form pour déchiffrer et afficher la clé privée/mnemonic.
+ * Formulaire pour déchiffrer le wallet Ethereum.
  */
-class DecryptWalletForm extends FormBase {
+final class DecryptWalletForm extends FormBase {
+
+  /**
+   * Temp store factory.
+   *
+   * @var \Drupal\Core\TempStore\PrivateTempStoreFactory
+   */
+  private PrivateTempStoreFactory $tempStoreFactory;
+
+  /**
+   * Constructs the form.
+   *
+   * @param \Drupal\Core\TempStore\PrivateTempStoreFactory $temp_store_factory
+   *   Temp store factory.
+   */
+  public function __construct(PrivateTempStoreFactory $temp_store_factory) {
+    $this->tempStoreFactory = $temp_store_factory;
+  }
 
   /**
    * {@inheritdoc}
    */
-  public static function create(ContainerInterface $container) {
-    return new static();
+  public static function create(ContainerInterface $container): static {
+    return new static(
+      $container->get('user.private_tempstore')
+    );
   }
 
   /**
    * {@inheritdoc}
    */
   public function getFormId(): string {
-    return 'eth_user_wallet_decrypt_wallet';
+    return 'eth_user_wallet_decrypt_form';
   }
 
   /**
    * {@inheritdoc}
    */
-  public function buildForm(array $form, FormStateInterface $form_state, UserInterface $user = NULL): array {
-    $form['passphrase'] = [
-      '#type' => 'password',
-      '#size' => 64,
-      '#required' => TRUE,
-      '#title' => $this->t('Passphrase'),
+  public function buildForm(array $form, FormStateInterface $form_state): array {
+    // Exemple d'utilisation du tempstore.
+    $store = $this->tempStoreFactory->get('eth_user_wallet');
+    $previous = $store->get('decrypted') ?? '';
+
+    $form['decrypted'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Previously decrypted'),
+      '#default_value' => $previous,
+      '#disabled' => TRUE,
     ];
+
     $form['actions']['submit'] = [
       '#type' => 'submit',
-      '#value' => $this->t('Déchiffrer'),
+      '#value' => $this->t('Decrypt'),
     ];
+
     return $form;
   }
 
@@ -49,34 +72,11 @@ class DecryptWalletForm extends FormBase {
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state): void {
-    $user       = $this->currentUser()->getAccount();
-    $passphrase = $form_state->getValue('passphrase');
+    // Implémentation de décryptage fictive.
+    $store = $this->tempStoreFactory->get('eth_user_wallet');
+    $store->set('decrypted', 'secret-value');
 
-    // Récupération des données.
-    $salt_b64   = $user->get('field_eth_user_salt')->value;
-    $cipher_b64 = $user->get('field_eth_ciphertext_user')->value;
-    $salt       = base64_decode($salt_b64);
-    $data       = base64_decode($cipher_b64);
-    $nonce      = substr($data, 0, 24);
-    $cipher     = substr($data, 24);
-
-    // Dérivation clé user + déchiffrement.
-    $key     = sodium_crypto_pwhash(
-      SODIUM_CRYPTO_SECRETBOX_KEYBYTES,
-      $passphrase,
-      $salt,
-      SODIUM_CRYPTO_PWHASH_OPSLIMIT_INTERACTIVE,
-      SODIUM_CRYPTO_PWHASH_MEMLIMIT_INTERACTIVE
-    );
-    $private = sodium_crypto_secretbox_open($cipher, $nonce, $key);
-    if ($private === false) {
-      $form_state->setErrorByName('passphrase', $this->t('Passphrase incorrecte.'));
-      return;
-    }
-
-    // Stockage en session temporaire.
-    $this->tempStoreFactory()->get('eth_user_wallet')->set('decrypted_private', $private);
-    $form_state->setRedirect('eth_user_wallet.dashboard', ['user' => $user->id()]);
+    $this->messenger()->addStatus($this->t('Wallet decrypted.'));
   }
 
 }

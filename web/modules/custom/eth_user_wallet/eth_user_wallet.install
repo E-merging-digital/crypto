@@ -2,53 +2,43 @@
 
 /**
  * @file
+ * Install/uninstall handlers for the eth_user_wallet module.
  */
 
-declare(strict_types=1);
-
-use Drupal\encrypt\Entity\EncryptionProfile;
-use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\field\Entity\FieldConfig;
+use Drupal\field\Entity\FieldStorageConfig;
 
 /**
  * Implements hook_install().
  */
 function eth_user_wallet_install(): void {
-  // -- Création des champs utilisateur (inchangé) --
+  // Crée les champs utilisateur nécessaires s'ils n'existent pas encore.
   $fields = [
-    'field_eth_address'             => ['type' => 'string', 'label' => 'Adresse Ethereum'],
-    'field_eth_mnemonic'            => ['type' => 'text_long', 'label' => 'Phrase mnémonique (BIP39)'],
-    'field_eth_ciphertext_server'   => ['type' => 'text_long', 'label' => 'Clé privée chiffrée (serveur)'],
-    'field_eth_ciphertext_user'     => ['type' => 'text_long', 'label' => 'Clé privée chiffrée (utilisateur)'],
-    'field_eth_user_salt'           => ['type' => 'string', 'label' => 'Salt utilisateur'],
+    'field_eth_wallet_address' => ['type' => 'string', 'cardinality' => 1, 'label' => 'Ethereum wallet address'],
+    'field_eth_user_salt' => ['type' => 'string', 'cardinality' => 1, 'label' => 'User salt'],
+    'field_eth_ciphertext_user' => ['type' => 'string_long', 'cardinality' => 1, 'label' => 'Ciphertext user'],
+    'field_eth_ciphertext_server' => ['type' => 'string_long', 'cardinality' => 1, 'label' => 'Ciphertext server'],
   ];
-  foreach ($fields as $name => $info) {
-    if (!FieldStorageConfig::loadByName('user', $name)) {
-      $storage = FieldStorageConfig::create([
-        'field_name'  => $name,
+
+  foreach ($fields as $field_name => $settings) {
+    if (!FieldStorageConfig::loadByName('user', $field_name)) {
+      FieldStorageConfig::create([
+        'field_name' => $field_name,
         'entity_type' => 'user',
-        'type'        => $info['type'],
-        'cardinality' => 1,
-      ]);
-      $storage->save();
-      FieldConfig::create([
-        'field_storage' => $storage,
-        'bundle'        => 'user',
-        'label'         => $info['label'],
+        'type' => $settings['type'],
+        'cardinality' => $settings['cardinality'],
       ])->save();
     }
-  }
 
-  // -- Création du profil d’encryption eth_wallet si manquant --
-  // Attention : la clé 'your_key_id_here' doit exister (module Key).
-  if (!EncryptionProfile::load('eth_wallet')) {
-    EncryptionProfile::create([
-      'id'     => 'eth_wallet',
-      'label'  => 'Ethereum Wallet',
-      'status' => TRUE,
-      'method' => 'real_aes',
-      'key'    => 'your_key_id_here',
-    ])->save();
+    if (!FieldConfig::loadByName('user', 'user', $field_name)) {
+      FieldConfig::create([
+        'field_name' => $field_name,
+        'entity_type' => 'user',
+        'bundle' => 'user',
+        'label' => $settings['label'],
+        'required' => FALSE,
+      ])->save();
+    }
   }
 }
 
@@ -56,24 +46,20 @@ function eth_user_wallet_install(): void {
  * Implements hook_uninstall().
  */
 function eth_user_wallet_uninstall(): void {
-  // Suppression des champs (inchangé)….
-  $fields = [
-    'field_eth_address',
-    'field_eth_mnemonic',
-    'field_eth_ciphertext_server',
-    'field_eth_ciphertext_user',
+  // Supprime proprement les champs créés.
+  $field_names = [
+    'field_eth_wallet_address',
     'field_eth_user_salt',
+    'field_eth_ciphertext_user',
+    'field_eth_ciphertext_server',
   ];
-  foreach ($fields as $name) {
-    if ($cfg = FieldConfig::loadByName('user', 'user', $name)) {
-      $cfg->delete();
+
+  foreach ($field_names as $field_name) {
+    if ($field = FieldConfig::loadByName('user', 'user', $field_name)) {
+      $field->delete();
     }
-    if ($st = FieldStorageConfig::loadByName('user', $name)) {
-      $st->delete();
+    if ($storage = FieldStorageConfig::loadByName('user', $field_name)) {
+      $storage->delete();
     }
-  }
-  // Suppression du profil d’encryption s’il existe.
-  if ($profile = EncryptionProfile::load('eth_wallet')) {
-    $profile->delete();
   }
 }

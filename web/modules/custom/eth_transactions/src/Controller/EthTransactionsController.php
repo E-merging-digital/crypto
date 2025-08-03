@@ -2,23 +2,36 @@
 
 namespace Drupal\eth_transactions\Controller;
 
-use Drupal\Core\Controller\ControllerBase;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
-use Drupal\eth_proxy\Service\EthProxyService;
 
-class EthTransactionsController extends ControllerBase {
-  protected EthProxyService $proxy;
-
-  public function __construct(EthProxyService $proxy) {
-    $this->proxy = $proxy;
-  }
+/**
+ * Fournit la liste des transactions pour une adresse Ethereum.
+ */
+final class EthTransactionsController {
 
   /**
-   * Liste des transactions pour une adresse.
+   * Liste les transactions pour une adresse.
+   *
+   * Note : l'API JSON-RPC d'Ethereum ne fournit pas de point de terminaison
+   * pour lister directement toutes les transactions d'une adresse. Ceci est un
+   * placeholder pour une future indexation ou service externe.
+   *
+   * @param string $address
+   *   Adresse Ethereum.
+   *
+   * @return \Symfony\Component\HttpFoundation\JsonResponse
+   *   Réponse JSON contenant l'adresse
+   *   et les transactions (actuellement vides).
    */
   public function list(string $address): JsonResponse {
-    // TODO: utiliser $this->proxy->request('eth_getTransactionByAddress', [$address]);
-    return new JsonResponse([]);
+    // @todo Fix problem "remplacer par une vraie implémentation" here
+    //   Explorer les blocs ou intégrer un index externe.
+    $transactions = [];
+
+    return new JsonResponse([
+      'address' => $address,
+      'transactions' => $transactions,
+    ]);
   }
+
 }
