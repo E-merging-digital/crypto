@@ -6,14 +6,12 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\encrypt\Entity\EncryptionProfile;
 use Drupal\encrypt\EncryptServiceInterface;
 use Drupal\user\UserInterface;
-use Drupal\Core\Entity\EntityStorageException;
 
 /**
  * Générateur de wallet Ethereum pour un utilisateur Drupal.
  *
- * NOTE : implémentation temporaire / de secours pour que le CI fonctionne sans
- * dépendances externes lourdes. Remplacer plus tard par une vraie génération
- * BIP39 + dérivation secp256k1 + adresse Ethereum via keccak256.
+ * Implémentation temporaire pour que le CI passe sans dépendances externes.
+ * À terme, remplacer par une vraie BIP39 + dérivation secp256k1 + adresse.
  */
 final class WalletGenerator {
 
@@ -25,14 +23,14 @@ final class WalletGenerator {
   private EncryptServiceInterface $encryptService;
 
   /**
-   * Entity type manager.
+   * Gestionnaire d'entités.
    *
    * @var \Drupal\Core\Entity\EntityTypeManagerInterface
    */
   private EntityTypeManagerInterface $entityTypeManager;
 
   /**
-   * Constructs the generator.
+   * Constructeur.
    *
    * @param \Drupal\encrypt\EncryptServiceInterface $encrypt_service
    *   Le service d'encryption.
@@ -45,42 +43,33 @@ final class WalletGenerator {
   }
 
   /**
-   * Génère un wallet et le stocke pour l'utilisateur.
+   * Génère un wallet Ethereum et le stocke pour l'utilisateur.
    *
    * @param \Drupal\user\UserInterface $account
-   *   L’utilisateur Drupal.
+   *   L'utilisateur Drupal.
    *
    * @throws \Drupal\Core\Entity\EntityStorageException
    *   En cas d'échec de sauvegarde.
+   * @throws \RuntimeException
+   *   Si le profil d'encryption est manquant.
    */
   public function generate(UserInterface $account): void {
-    // Idempotence : ne pas régénérer si déjà présent.
+    // Idempotence : ne rien faire si une adresse existe déjà.
     if (!$account->get('field_eth_wallet_address')->isEmpty()) {
       return;
     }
 
-    // ---- Ancienne implémentation avec web3p (retirée pour compatibilité PHP 8.3) ----
-    // use Web3p\EthereumWallet\Wallet;
-    // $wallet = new Wallet();
-    // $wallet->generate(12);
-    // $mnemonic = $wallet->mnemonic;
-    // $privateKey = $wallet->privateKey;
-    // $address = $wallet->address;
-    // ---------------------------------------------------------------------------------
+    // Phrase mnémonique factice (à remplacer par BIP39 réel).
+    $mnemonic = bin2hex(random_bytes(16));
 
-    // 1) Génération d'une phrase mnémonique factice (remplacer par BIP39 réel).
-    $mnemonic = bin2hex(random_bytes(16)); // placeholder : 32 hex chars
-
-    // 2) Génération d'une clé privée aléatoire (32 bytes).
+    // Clé privée aléatoire.
     $privateKeyBin = random_bytes(32);
-    $privateKeyHex = bin2hex($privateKeyBin);
 
-    // 3) Dérivation simplifiée d'une "adresse" : sha256 de la clé privée, truncation.
+    // Adresse factice : sha256 de la clé privée, tronquée.
     $hash = hash('sha256', $privateKeyBin);
     $address = '0x' . substr($hash, -40);
     $address = strtolower($address);
 
-    // 4) Chiffrement de la clé privée (serveur).
     $profile = EncryptionProfile::load('eth_wallet');
     if (!$profile) {
       throw new \RuntimeException('Profil "eth_wallet" introuvable.');
@@ -88,7 +77,6 @@ final class WalletGenerator {
 
     $cipher = $this->encryptService->encrypt($privateKeyBin, $profile);
 
-    // 5) Stockage dans les champs utilisateurs.
     $account
       ->set('field_eth_wallet_address', $address)
       ->set('field_eth_mnemonic', $mnemonic)
@@ -100,4 +88,3 @@ final class WalletGenerator {
   }
 
 }
-`
