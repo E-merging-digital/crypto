@@ -1,0 +1,9 @@
+# twigcs.yml
+# Configuration pour limiter twigcs aux templates du projet (pas ceux de vendor).
+paths:
+  - web/modules/custom
+  - web/themes/custom
+
+ignore_paths:
+  - vendor/**
+  - web/core/**

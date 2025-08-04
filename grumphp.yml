@@ -12,7 +12,14 @@ grumphp:
       ignore_patterns:
         - web/core/*
         - web/vendor/*
-    twigcs: ~
+    twigcs:
+      triggered_by: [ 'twig' ]
+      # On exclut explicitement vendor et core pour éviter d'analyser les templates tiers.
+      exclude:
+        - vendor/**
+        - web/core/**
+      # Si twigcs lit automatiquement twigcs.yml, c'est suffisant.
+      # Sinon, certains wrappers permettent de passer un fichier config via CLI.
     phpstan:
       configuration: phpstan.neon
       memory_limit: "2G"
