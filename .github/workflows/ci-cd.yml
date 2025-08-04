@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
     container:
-      image: registry.gitlab.com/drupal-infrastructure/drupalci/drupalci-environments:latest
+      image: registry.gitlab.com/drupal-infrastructure/drupalci/drupalci-environments/php-8.3-ubuntu-apache:production
     steps:
       - uses: actions/checkout@v4
 
