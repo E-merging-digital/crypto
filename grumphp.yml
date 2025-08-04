@@ -4,6 +4,7 @@ grumphp:
     EXEC_GRUMPHP_COMMAND: ddev exec
   stop_on_failure: true
   process_timeout: 300
+  parallel: false
 
   tasks:
     phpcs:
@@ -14,12 +15,15 @@ grumphp:
         - web/vendor/*
     twigcs:
       triggered_by: [ 'twig' ]
-      # On exclut explicitement vendor et core pour éviter d'analyser les templates tiers.
+      # On laisse path à sa valeur par défaut ('.'); ne PAS fournir un tableau ici.
+      severity: warning
+      display: all
+      ruleset: FriendsOfTwig\Twigcs\Ruleset\Official
       exclude:
         - vendor/**
         - web/core/**
-      # Si twigcs lit automatiquement twigcs.yml, c'est suffisant.
-      # Sinon, certains wrappers permettent de passer un fichier config via CLI.
+        - web/modules/contrib/**
+        - web/themes/contrib/**
     phpstan:
       configuration: phpstan.neon
       memory_limit: "2G"
