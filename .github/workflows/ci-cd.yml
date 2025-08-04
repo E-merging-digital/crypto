@@ -70,9 +70,24 @@ jobs:
 
       - name: Ensure ext-gmp is present
         run: |
+          set -eux
+
+          # Installer GMP pour PHP 8.3
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-gmp || echo "php8.3-gmp not available; consider extending image to include gmp"
-          php -m | grep -i gmp
+          DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-gmp
+
+          # Activer le module (créé dans mods-available)
+          phpenmod gmp
+
+          # Vérifier qu'il est bien chargé, sinon dump diagnostic
+          if php -m | grep -i gmp; then
+            echo "✅ gmp extension is loaded"
+          else
+            echo "❌ gmp extension is NOT loaded; diagnostics:"
+            php --ini
+            php -i | head -n 200
+            exit 1
+          fi
 
       - name: Install dependencies for Behat
         run: |
