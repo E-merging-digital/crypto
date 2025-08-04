@@ -20,10 +20,10 @@ grumphp:
       display: all
       ruleset: FriendsOfTwig\Twigcs\Ruleset\Official
       exclude:
-        - vendor/**
-        - web/core/**
-        - web/modules/contrib/**
-        - web/themes/contrib/**
+        - vendor
+        - web/core
+        - web/modules/contrib
+        - web/themes/contrib
     phpstan:
       configuration: phpstan.neon
       memory_limit: "2G"
