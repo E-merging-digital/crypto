@@ -2,16 +2,14 @@
 
 declare(strict_types=1);
 
-/*
- * Configuration file for twigcs.
- * Limite l’analyse aux templates custom (modules + thèmes) et évite vendor / core.
- */
+use FriendsOfTwig\Twigcs\Config\Config;
+use FriendsOfTwig\Twigcs\Finder\TemplateFinder;
+use FriendsOfTwig\Twigcs\Ruleset\Official;
 
-return Twigcs\Config\Config::create()
+return Config::create()
   ->setName('crypto-custom')
-  ->setSeverity('error') // ou 'warning' si tu veux moins strict
+  ->setSeverity('warning')
   ->setReporter('console')
-  ->setRuleSet(Twigcs\Ruleset\Official::class)
-  // Trouve les templates uniquement dans les modules et thèmes custom.
-  ->addFinder(Twigcs\Finder\TemplateFinder::create()->in(__DIR__ . '/web/modules/custom'))
-  ->addFinder(Twigcs\Finder\TemplateFinder::create()->in(__DIR__ . '/web/themes/custom'));
+  ->setRuleSet(Official::class)
+  ->addFinder(TemplateFinder::create()->in(__DIR__ . '/web/modules/custom'))
+  ->addFinder(TemplateFinder::create()->in(__DIR__ . '/web/themes/custom'));
