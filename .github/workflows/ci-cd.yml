@@ -58,7 +58,7 @@ jobs:
 
   behat:
     name: Behat end-to-end tests
-    runs-on: ubuntu-latest       # ← À ajouter
+    runs-on: ubuntu-latest
     needs: phpunit-and-lint
     container:
       image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
@@ -68,15 +68,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
+
       - name: Install dependencies
-        env:
-          COMPOSER_PROCESS_TIMEOUT: 1200
         run: composer install --prefer-dist --no-interaction --optimize-autoloader
+
       - name: Setup Behat extensions
         run: |
-          composer require --dev behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
+          composer require --dev behat/behat \
+            behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
+
+      - name: Add Composer bin to PATH
+        run: echo "${{ github.workspace }}/vendor/bin" >> $GITHUB_PATH
+
       - name: Run Behat
         working-directory: web
         run: behat --colors --out formats
