@@ -103,22 +103,21 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: PHP & Composer
+      - name: PHP & Composer for deploy
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
           tools: composer
 
-      - name: Composer install for deploy
-        run: |
-          composer install --no-dev --prefer-dist --optimize-autoloader
+      - name: Composer install (no-dev)
+        run: composer install --no-dev --prefer-dist --optimize-autoloader
 
       - name: Build theme assets (si thème custom existe)
         working-directory: web/themes/custom
         run: |
           npm ci && npm run build
 
-      - name: Push sur le repo de production
+      - name: Push to production repo
         run: |
           git config --global user.email "github-actions@github.com"
           git config --global user.name "GitHub CI"
