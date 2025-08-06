@@ -89,7 +89,7 @@ jobs:
 
       - name: Run Behat
         working-directory: web
-        run: vendor/bin/behat --colors --out formats
+        run: behat --colors --out formats
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
