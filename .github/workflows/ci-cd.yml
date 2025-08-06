@@ -84,11 +84,10 @@ jobs:
           composer require --dev behat/behat \
             behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
 
-      - name: Add Composer bin to PATH
-        run: echo "${{ github.workspace }}/vendor/bin" >> $GITHUB_PATH
-
       - name: Run Behat
         working-directory: web
+        env:
+          PATH: ${{ github.workspace }}/vendor/bin:${{ env.PATH }}
         run: behat --colors --out formats
 
   deploy:
