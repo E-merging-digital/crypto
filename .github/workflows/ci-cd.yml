@@ -1,108 +1,129 @@
-name: "CI/CD Drupal11 PHP8.3"
+name: "CI/CD Drupal 11 – crypto"
+
+defaults:
+  run:
+    shell: bash
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ '*' ]
+    branches: [main]
 
 jobs:
-  lint-test:
+  phpunit-and-lint:
+    name: PhpUnit & lint
     runs-on: ubuntu-latest
-    container:
-      image: php:8.3-cli
-      options: --user root
-    defaults:
-      run:
-        shell: bash
-    env:
-      COMPOSER_PROCESS_TIMEOUT: 1200
-      PATH: vendor/bin:$PATH
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Install system dependencies & PHP extensions
-        run: |
-          apt-get update
-          apt-get install -y git unzip libpng-dev libjpeg-dev libwebp-dev libgmp-dev
-          docker-php-ext-install gd gmp
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "${{ github.workspace }}"
 
-      - name: Cache Composer
-        uses: actions/cache@v3
-        with:
-          path: ~/.composer/cache
-          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
-
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist --no-progress
-
-      - name: Run GrumPHP (lint, PHPStan)
-        run: vendor/bin/grumphp run
-
-      - name: Run PHPUnit
-        run: vendor/bin/phpunit --colors=always
-
-  behat:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
-      options: --user root
-    defaults:
-      run:
-        shell: bash
-    env:
-      COMPOSER_PROCESS_TIMEOUT: 1200
-      PATH: vendor/bin:$PATH
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist --no-progress
-
-      - name: Run Behat tests
-        run: vendor/bin/behat --colors --out=progress
-
-  deploy:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    env:
-      COMPOSER_PROCESS_TIMEOUT: 1200
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Setup PHP 8.3 & extensions
+      - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: gd, gmp
+          coverage: none
+          extensions: xml, gd, mysqli, zip, gmp
+          tools: composer
 
-      - name: Cache Composer
-        uses: actions/cache@v3
+      - name: Show loaded PHP modules (debug)
+        run: php -m | head -n 200
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
         with:
-          path: ~/.composer/cache
+          path: |
+            ~/.composer/cache
+            vendor
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
 
-      - name: Install Composer dependencies (no dev)
-        run: composer install --no-dev --no-interaction --prefer-dist --no-progress
-
-      - name: Build theme assets
+      - name: Install project dependencies
+        env:
+          COMPOSER_PROCESS_TIMEOUT: 1200
         run: |
-          npm install
-          npm run build
+          composer install --prefer-dist --no-interaction --optimize-autoloader
 
-      - name: Deploy via SSH & Drush
-        uses: appleboy/ssh-action@v0.1.5
+      - name: Prepare Drupal test output directories
+        run: |
+          mkdir -p web/sites/simpletest/browser_output
+          chmod -R 775 web/sites/simpletest
+
+      - name: Ensure run-tests.sh is executable
+        run: chmod +x scripts/run-tests.sh
+
+      - name: Run GrumPHP (lint + static analysis + PHPUnit)
+        env:
+          SIMPLETEST_BASE_URL: http://127.0.0.1:8080
+          SIMPLETEST_DB: sqlite://localhost/web/sites/default/files/.ht.sqlite
+          BROWSERTEST_OUTPUT_DIRECTORY: web/sites/simpletest/browser_output
+        run: vendor/bin/grumphp run
+
+  behat:
+    name: Behat end-to-end tests
+    runs-on: ubuntu-latest
+    needs: phpunit-and-lint
+    container:
+      image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
+      options: --entrypoint bash
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      COMPOSER_PROCESS_TIMEOUT: 1200
+      PATH: ${{ github.workspace }}/vendor/bin:$PATH
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mark workspace safe
+        run: git config --global --add safe.directory "${{ github.workspace }}"
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Run Behat tests
+        working-directory: web
+        run: vendor/bin/behat --colors --out=progress
+
+  deploy:
+    name: Déploiement (à adapter selon l’environnement)
+    runs-on: ubuntu-latest
+    needs: [phpunit-and-lint, behat]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH for private deploy
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            cd /path/to/drupal
-            drush updatedb -y
-            drush cache:rebuild
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: PHP & Composer for deploy
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
+      - name: Composer install (no-dev)
+        run: composer install --no-dev --prefer-dist --optimize-autoloader
+
+      - name: Build theme assets (si thème custom existe)
+        working-directory: web/themes/custom
+        run: |
+          npm ci && npm run build
+
+      - name: Push to production repo
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub CI"
+          git remote add production ${{ secrets.PRODUCTION_SSH_REPO }}
+          git push production main:main --force-with-lease
+
+      - name: Run Drush post-deploy
+        run: |
+          ssh ${{ secrets.PROD_SSH }} "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
+        env:
+          PROD_SSH: ${{ secrets.PROD_SSH }}
