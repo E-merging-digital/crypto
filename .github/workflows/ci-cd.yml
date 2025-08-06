@@ -1,5 +1,7 @@
 name: CI/CD Drupal 11 – crypto
-
+defaults:
+  run:
+    shell: bash
 on:
   push:
     branches: [main]
@@ -88,7 +90,7 @@ jobs:
       - name: Run Behat
         working-directory: web
         env:
-          PATH: ${{ github.workspace }}/vendor/bin:${{ env.PATH }}
+          PATH: "${{ github.workspace }}/vendor/bin:${PATH}"
         run: behat --colors --out formats
 
   deploy:
