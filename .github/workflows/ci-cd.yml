@@ -64,6 +64,7 @@ jobs:
     needs: phpunit-and-lint
     container:
       image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
+      options: --entrypoint /bin/bash
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
