@@ -71,6 +71,8 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
       - name: Install dependencies
+        env:
+          COMPOSER_PROCESS_TIMEOUT: 1200
         run: composer install --prefer-dist --no-interaction --optimize-autoloader
       - name: Setup Behat extensions
         run: |
