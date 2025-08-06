@@ -57,34 +57,24 @@ jobs:
           vendor/bin/grumphp run
 
   behat:
-    name: Behat end-to-end tests
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
     container:
-      image: ghcr.io/e-merging-digital/crypto-drupalci:php8.3-gmp
-      # si l'image est privée, tu peux fournir des credentials :
+      image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Mark workspace safe for git (inside container)
+      - name: Mark safe directory
         run: git config --global --add safe.directory "${{ github.workspace }}"
-
-      - name: Install dependencies for Behat
-        run: |
-          composer install --prefer-dist --no-interaction --optimize-autoloader
-
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --optimize-autoloader
       - name: Setup Behat extensions
-        run: |
-          composer require --dev behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
-
+        run: composer require --dev behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
       - name: Run Behat
         working-directory: web
-        run: |
-          behat --colors --out formats
+        run: behat --colors --out formats
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
