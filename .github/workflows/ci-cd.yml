@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
     container:
-      image: ghcr.io/<ton-orga-or-username>/crypto-drupalci:php8.3-gmp
+      image: ghcr.io/e-merging-digital/crypto-drupalci:php8.3-gmp
       # si l'image est privée, tu peux fournir des credentials :
       credentials:
         username: ${{ github.actor }}
@@ -85,7 +85,7 @@ jobs:
         working-directory: web
         run: |
           behat --colors --out formats
-  
+
   deploy:
     name: Déploiement (à adapter selon l’environnement)
     runs-on: ubuntu-latest
