@@ -10,12 +10,47 @@ default:
 
   extensions:
     Behat\MinkExtension:
-      base_url: 'http://127.0.0.1:8080'
       default_session: selenium2
       javascript_session: selenium2
       selenium2:
         browser: chrome
-        capabilities: { "chromeOptions": { "args": ["--headless=new","--disable-gpu","--no-sandbox","--window-size=1920,1080"] } }
-    Drupal\DrupalExtension:
-      blackbox: ~
-      api_driver: 'drupal'
+        capabilities:
+          acceptSslCerts: true
+          chrome:
+            switches:
+              - "--headless=new"
+              - "--disable-gpu"
+              - "--no-sandbox"
+              - "--window-size=1920,1080"
+
+ddev:
+  extensions:
+    Behat\MinkExtension:
+      base_url: 'https://${DDEV_SITENAME}.ddev.site'
+      selenium2:
+        wd_host: 'http://selenium:4444/wd/hub'
+        browser: chrome
+        capabilities:
+          acceptSslCerts: true
+          chrome:
+            switches:
+              - "--headless=new"
+              - "--disable-gpu"
+              - "--no-sandbox"
+              - "--window-size=1920,1080"
+
+ci:
+  extensions:
+    Behat\MinkExtension:
+      base_url: 'http://127.0.0.1:8080'
+      selenium2:
+        wd_host: 'http://selenium:4444/wd/hub'
+        browser: chrome
+        capabilities:
+          acceptSslCerts: true
+          chrome:
+            switches:
+              - "--headless=new"
+              - "--disable-gpu"
+              - "--no-sandbox"
+              - "--window-size=1920,1080"
