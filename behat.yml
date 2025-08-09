@@ -62,7 +62,7 @@ ddev:
 ci:
   extensions:
     Behat\MinkExtension:
-      base_url: 'http://web'
+      base_url: 'http://web:8080'
       sessions:
         symfony:
           browserkit_http: ~

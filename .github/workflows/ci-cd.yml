@@ -83,11 +83,13 @@ jobs:
 
     services:
       web:
-        image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git  # php:8.3-apache dérivée
+        image: php:8.3-cli
         options: >-
           -v ${{ github.workspace }}:/var/www/html:rw
-          --health-cmd="bash -lc 'curl -fsS http://localhost/ >/dev/null || exit 1'"
+          --health-cmd="bash -lc 'curl -fsS http://localhost:8080/ >/dev/null || exit 1'"
           --health-interval=5s --health-timeout=5s --health-retries=30
+        command: >
+          bash -lc "php -S 0.0.0.0:8080 -t /var/www/html/web"
       selenium:
         image: selenium/standalone-chrome:126.0
         options: >-
