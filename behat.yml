@@ -7,10 +7,15 @@ default:
         - App\Tests\Behat\FeatureContext
         - Drupal\DrupalExtension\Context\MinkContext
         - Drupal\DrupalExtension\Context\DrupalContext
+
   extensions:
     Behat\MinkExtension:
       base_url: 'http://127.0.0.1:8080'
-      goutte: ~
+      default_session: selenium2
+      javascript_session: selenium2
+      selenium2:
+        browser: chrome
+        capabilities: { "chromeOptions": { "args": ["--headless=new","--disable-gpu","--no-sandbox","--window-size=1920,1080"] } }
     Drupal\DrupalExtension:
       blackbox: ~
       api_driver: 'drupal'

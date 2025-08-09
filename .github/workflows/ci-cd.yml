@@ -79,6 +79,15 @@ jobs:
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+    services:
+      selenium:
+        image: selenium/standalone-chrome:126.0
+        ports:
+          - 4444:4444
+        options: >-
+          --shm-size="2g"
+          --health-cmd="curl -s http://localhost:4444/status | grep -q 'ready'"
+          --health-interval=5s --health-timeout=5s --health-retries=20
 
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +95,7 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
 
-      - name: Sanity check shell & PATH (debug)
+      - name: Sanity check shell & PATH
         run: |
           command -v bash
           echo "PATH=$PATH"
@@ -107,19 +116,18 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # IMPORTANT : on n'installe plus behat ici s'il est déjà en require-dev.
-      # Gardez cette étape *uniquement* si vous n’avez pas modifié composer.json :
-      # - name: Setup Behat extensions (legacy)
-      #   run: composer require --dev behat/behat behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
-
-      - name: Dump autoload (au cas où)
-        run: composer dump-autoload -o
+      - name: Verify Selenium hub readiness
+        run: |
+          for i in {1..60}; do
+            if curl -s http://selenium:4444/status | grep -q '"ready":true'; then
+              echo "Selenium is ready"; break; fi
+            echo "Waiting for Selenium..."; sleep 2
+          done
 
       - name: Verify FeatureContext autoload
         run: |
-          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\\\Tests\\\\Behat\\\\FeatureContext") ? "OK" : "MISSING") . PHP_EOL;'
+          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\\\Tests\\\\Behat\\\\FeatureContext") ? "OK" : "MISSING"), PHP_EOL;'
 
-      # Lancer Behat depuis la racine (où se trouve behat.yml)
       - name: Run Behat
         run: behat --colors --strict --out formats
 

@@ -1,0 +1,13 @@
+version: "3.6"
+
+services:
+  selenium:
+    image: selenium/standalone-chrome:126.0
+    container_name: ddev-${DDEV_SITENAME}-selenium
+    shm_size: "2g"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:4444/status | grep -q '\"ready\": true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    # Pas besoin d'exposer de port; le réseau interne DDEV suffit.
