@@ -74,8 +74,6 @@ jobs:
     name: Behat end-to-end tests
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
-
-    # 3) Conteneur custom : il doit contenir bash, git, ext-gd, ext-gmp
     container:
       image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
       credentials:
@@ -93,7 +91,7 @@ jobs:
           command -v bash
           echo "PATH=$PATH"
 
-      - name: Cache Composer dependencies
+      - name: Cache Composer (in container)
         uses: actions/cache@v4
         with:
           path: |
@@ -103,26 +101,26 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-composer-
 
-      - name: Install dependencies
+      - name: Install dev dependencies
         run: composer install --prefer-dist --no-interaction --optimize-autoloader
 
-      # IMPORTANT : on APPEND à PATH via GITHUB_PATH (ne PAS utiliser env: PATH=... ici)
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Idéalement, ces extensions Behat sont déjà dans "require-dev" du projet.
-      # Si vous gardez cette étape, elle marche mais rallonge le temps CI.
-      - name: Setup Behat extensions (optional if already in composer.json)
-        run: |
-          composer require --dev \
-            behat/behat \
-            behat/mink-extension \
-            drupal/drupal-extension \
-            behat/mink-selenium2-driver
+      # IMPORTANT : on n'installe plus behat ici s'il est déjà en require-dev.
+      # Gardez cette étape *uniquement* si vous n’avez pas modifié composer.json :
+      # - name: Setup Behat extensions (legacy)
+      #   run: composer require --dev behat/behat behat/mink-extension drupal/drupal-extension behat/mink-selenium2-driver
 
-      # Si votre behat.yml est dans /web, gardez working-directory: web.
+      - name: Dump autoload (au cas où)
+        run: composer dump-autoload -o
+
+      - name: Verify FeatureContext autoload
+        run:
+          php -r "require 'vendor/autoload.php'; echo (class_exists('App\\Tests\\Behat\\FeatureContext') ? 'OK': 'MISSING').PHP_EOL;"
+
+      # Lancer Behat depuis la racine (où se trouve behat.yml)
       - name: Run Behat
-        working-directory: web
         run: behat --colors --strict --out formats
 
   deploy:
