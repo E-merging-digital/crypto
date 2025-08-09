@@ -4,53 +4,78 @@ default:
       paths:
         - tests/behat/features
       contexts:
-        - App\Tests\Behat\FeatureContext
-        - Drupal\DrupalExtension\Context\MinkContext
-        - Drupal\DrupalExtension\Context\DrupalContext
+        - 'App\Tests\Behat\FeatureContext'
+        - 'Drupal\DrupalExtension\Context\MinkContext'
+        - 'Drupal\DrupalExtension\Context\DrupalContext'
 
   extensions:
     Behat\MinkExtension:
-      default_session: selenium2
+      # Non-JS par défaut (rapide, expose les codes HTTP)
+      default_session: symfony
+      # JS via Selenium quand un scénario est tagué @javascript
       javascript_session: selenium2
-      selenium2:
-        browser: chrome
-        capabilities:
-          acceptSslCerts: true
-          chrome:
-            switches:
-              - "--headless=new"
-              - "--disable-gpu"
-              - "--no-sandbox"
-              - "--window-size=1920,1080"
+
+      # Utile uniquement pour Selenium ; ignoré par BrowserKit.
+      base_url: 'http://web'
+
+      sessions:
+        symfony:
+          browserkit_http: ~
+        selenium2:
+          selenium2:
+            wd_host: 'http://selenium:4444/wd/hub'
+            browser: chrome
+            capabilities:
+              acceptSslCerts: true
+              chrome:
+                switches:
+                  - "--headless=new"
+                  - "--disable-gpu"
+                  - "--no-sandbox"
+                  - "--window-size=1920,1080"
+
+    Drupal\DrupalExtension:
+      api_driver: 'drupal'
+      drupal:
+        drupal_root: '%paths.base%/web'
 
 ddev:
   extensions:
     Behat\MinkExtension:
-      base_url: 'https://${DDEV_SITENAME}.ddev.site'
-      selenium2:
-        wd_host: 'http://selenium:4444/wd/hub'
-        browser: chrome
-        capabilities:
-          acceptSslCerts: true
-          chrome:
-            switches:
-              - "--headless=new"
-              - "--disable-gpu"
-              - "--no-sandbox"
-              - "--window-size=1920,1080"
+      base_url: 'http://web'
+      sessions:
+        symfony:
+          browserkit_http: ~
+        selenium2:
+          selenium2:
+            wd_host: 'http://selenium:4444/wd/hub'
+            browser: chrome
+            capabilities:
+              acceptSslCerts: true
+              chrome:
+                switches:
+                  - "--headless=new"
+                  - "--disable-gpu"
+                  - "--no-sandbox"
+                  - "--window-size=1920,1080"
 
 ci:
   extensions:
     Behat\MinkExtension:
       base_url: 'http://127.0.0.1:8080'
-      selenium2:
-        wd_host: 'http://selenium:4444/wd/hub'
-        browser: chrome
-        capabilities:
-          acceptSslCerts: true
-          chrome:
-            switches:
-              - "--headless=new"
-              - "--disable-gpu"
-              - "--no-sandbox"
-              - "--window-size=1920,1080"
+      # On re-déclare explicitement les sessions
+      sessions:
+        symfony:
+          browserkit_http: ~
+        selenium2:
+          selenium2:
+            wd_host: 'http://selenium:4444/wd/hub'
+            browser: chrome
+            capabilities:
+              acceptSslCerts: true
+              chrome:
+                switches:
+                  - "--headless=new"
+                  - "--disable-gpu"
+                  - "--no-sandbox"
+                  - "--window-size=1920,1080"
