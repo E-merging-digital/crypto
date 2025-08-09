@@ -116,8 +116,8 @@ jobs:
         run: composer dump-autoload -o
 
       - name: Verify FeatureContext autoload
-        run:
-          php -r "require 'vendor/autoload.php'; echo (class_exists('App\\Tests\\Behat\\FeatureContext') ? 'OK': 'MISSING').PHP_EOL;"
+        run: |
+          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\\\Tests\\\\Behat\\\\FeatureContext") ? "OK" : "MISSING") . PHP_EOL;'
 
       # Lancer Behat depuis la racine (où se trouve behat.yml)
       - name: Run Behat

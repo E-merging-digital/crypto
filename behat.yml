@@ -1,0 +1,16 @@
+default:
+  suites:
+    default:
+      paths:
+        - tests/behat/features
+      contexts:
+        - App\Tests\Behat\FeatureContext
+        - Drupal\DrupalExtension\Context\MinkContext
+        - Drupal\DrupalExtension\Context\DrupalContext
+  extensions:
+    Behat\MinkExtension:
+      base_url: 'http://127.0.0.1:8080'
+      goutte: ~
+    Drupal\DrupalExtension:
+      blackbox: ~
+      api_driver: 'drupal'
