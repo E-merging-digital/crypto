@@ -75,7 +75,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
 
-    # Le job tourne dans ton image custom (utile pour composer/extensions)
     container:
       image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
       credentials:
@@ -83,13 +82,12 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     services:
-      # ✅ Serveur web accessible par Selenium
       web:
-        image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git   # dérivée de php:8.3-apache
+        image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git  # php:8.3-apache dérivée
         options: >-
+          -v ${{ github.workspace }}:/var/www/html:rw
           --health-cmd="bash -lc 'curl -fsS http://localhost/ >/dev/null || exit 1'"
           --health-interval=5s --health-timeout=5s --health-retries=30
-          -v ${{ github.workspace }}:/var/www/html:rw
       selenium:
         image: selenium/standalone-chrome:126.0
         options: >-
@@ -136,7 +134,7 @@ jobs:
           done
 
       - name: Verify FeatureContext autoload
-        run: |
+        run:
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\\\Tests\\\\Behat\\\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
       - name: Run Behat (profil CI)
