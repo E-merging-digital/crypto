@@ -92,7 +92,7 @@ jobs:
           --health-interval=5s --health-timeout=5s --health-retries=30
           -e SE_NODE_MAX_SESSIONS=1
           -e SE_NODE_SESSION_TIMEOUT=300
-      # MariaDB facultatif (non utilisé par les tests ci-dessous, conservé pour la structure)
+      # Service DB conservé (structure identique), non utilisé en CI SQLite :
       db:
         image: mariadb:10.6
         env:
@@ -131,7 +131,7 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # ---- [JOB CONTAINER] Mise à niveau SQLite >= 3.45 + extension PHP sqlite3
+      # Mise à niveau SQLite >= 3.45 + extension PHP sqlite3 (dans le job container)
       - name: Upgrade SQLite (job container) & ensure php-sqlite3
         run: |
           set -e
@@ -139,7 +139,6 @@ jobs:
           echo "deb http://deb.debian.org/debian ${VERSION_CODENAME}-backports main" > /etc/apt/sources.list.d/backports.list
           apt-get update -y
           DEBIAN_FRONTEND=noninteractive apt-get -y -t ${VERSION_CODENAME}-backports install libsqlite3-0 sqlite3 || true
-          # Installer l'extension PHP sqlite3 si absente (8.3, 8.2 ou générique)
           if ! php -m | grep -qi sqlite3; then
             if apt-cache show php8.3-sqlite3 >/dev/null 2>&1; then
               DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-sqlite3
@@ -153,33 +152,7 @@ jobs:
           echo "PHP SQLite3 lib version:"
           php -r 'echo (class_exists("SQLite3")? (SQLite3::version()["lib"]??"n/a") : "no-sqlite3-ext"), PHP_EOL;'
 
-      # ---- [SERVICE WEB] Mise à niveau SQLite >= 3.45 + extension PHP sqlite3
-      - name: Upgrade SQLite (web service) & ensure php-sqlite3
-        run: |
-          set -e
-          WEB_CID="$(docker ps -aqf "name=web")"
-          if [ -z "$WEB_CID" ]; then echo "Web service container not found"; exit 1; fi
-          docker exec "$WEB_CID" bash -lc '
-            set -e
-            . /etc/os-release
-            echo "deb http://deb.debian.org/debian ${VERSION_CODENAME}-backports main" > /etc/apt/sources.list.d/backports.list
-            apt-get update -y
-            DEBIAN_FRONTEND=noninteractive apt-get -y -t ${VERSION_CODENAME}-backports install libsqlite3-0 sqlite3 || true
-            if ! php -m | grep -qi sqlite3; then
-              if apt-cache show php8.3-sqlite3 >/dev/null 2>&1; then
-                DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-sqlite3
-              elif apt-cache show php8.2-sqlite3 >/dev/null 2>&1; then
-                DEBIAN_FRONTEND=noninteractive apt-get install -y php8.2-sqlite3
-              else
-                DEBIAN_FRONTEND=noninteractive apt-get install -y php-sqlite3 || true
-              fi
-            fi
-            echo "sqlite3 CLI version:"; sqlite3 --version || true
-            echo "PHP SQLite3 lib version:"; php -r "echo (class_exists(\"SQLite3\")? (SQLite3::version()[\"lib\"]??\"n/a\") : \"no-sqlite3-ext\"), PHP_EOL;"
-            (command -v apache2ctl && apache2ctl -k graceful) || (command -v service && service apache2 reload) || true
-          '
-
-      # Préparer settings.php pour SQLite (api_driver BrowserKit/Drupal OK)
+      # Préparer settings.php pour SQLite
       - name: Prepare Drupal settings.php for CI (SQLite)
         run: |
           set -e
@@ -198,7 +171,7 @@ jobs:
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      # Installer Drupal (SQLite) pour éviter 403 et avoir un site prêt pour Behat
+      # Installer Drupal (SQLite) pour un site opérationnel avant Behat
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
@@ -217,88 +190,4 @@ jobs:
           set -euo pipefail
           ATTEMPTS=120
           for i in $(seq 1 $ATTEMPTS); do
-            if curl -fsS http://selenium:4444/status | jq -e '.ready == true' >/dev/null 2>&1; then
-              echo "Selenium ready via /status"; exit 0
-            fi
-            if curl -fsS http://selenium:4444/wd/hub/status | jq -e '.value.ready == true' >/dev/null 2>&1; then
-              echo "Selenium ready via /wd/hub/status"; exit 0
-            fi
-            echo "Waiting Selenium... ($i/$ATTEMPTS)"
-            sleep 2
-          done
-          echo "Selenium did not become ready in time."
-          exit 1
-
-      - name: Wait for web service (TCP check)
-        run: |
-          set -euo pipefail
-          ATTEMPTS=60
-          for i in $(seq 1 $ATTEMPTS); do
-            if curl -s --max-time 2 http://web/ >/dev/null 2>&1; then
-              echo "Web reachable"; exit 0
-            fi
-            echo "Waiting Web... ($i/$ATTEMPTS)"
-            sleep 2
-          done
-          echo "Web did not become reachable in time."
-          exit 1
-
-      # 🔎 Vérification demandée (pipe exact)
-      - name: Verify FeatureContext autoload
-        run: |
-          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
-
-      - name: Run Behat (profil CI)
-        run: vendor/bin/behat -c behat.yml -p ci --colors --strict
-
-      - name: Dump Selenium logs on failure
-        if: failure()
-        run: |
-          echo "=== Selenium logs ==="
-          docker logs "$(docker ps -aqf "name=selenium")" || true
-      - name: Dump Web logs on failure
-        if: failure()
-        run: |
-          echo "=== Apache access/error logs (if available) ==="
-          docker exec "$(docker ps -aqf "name=web")" bash -lc 'tail -n 200 /var/log/apache2/error.log 2>/dev/null || true; tail -n 200 /var/log/apache2/access.log 2>/dev/null || true' || true
-
-  deploy:
-    name: Déploiement (à adapter selon l’environnement)
-    runs-on: ubuntu-latest
-    needs: [phpunit-and-lint, behat]
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up SSH for private deploy
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
-
-      - name: PHP & Composer
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          tools: composer
-
-      - name: Composer install for deploy (no dev)
-        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
-
-      - name: Build theme assets (si thème custom existe)
-        working-directory: web/themes/custom
-        run: |
-          if [ -f package.json ]; then npm ci && npm run build; else echo "No theme build"; fi
-
-      - name: Push sur le repo de production
-        run: |
-          git config --global user.email "github-actions@github.com"
-          git config --global user.name "GitHub CI"
-          git remote add production ${{ secrets.PRODUCTION_SSH_REPO }}
-          git push production main:main --force-with-lease
-
-      - name: Run Drush post-deploy
-        env:
-          PROD_SSH: ${{ secrets.PROD_SSH }}
-        run: |
-          ssh -o StrictHostKeyChecking=no "$PROD_SSH" \
-            "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
+            if curl -fsS http://selenium:4444/status | jq -e '.ready == t
