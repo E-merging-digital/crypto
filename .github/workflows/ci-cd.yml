@@ -84,10 +84,19 @@ jobs:
           APACHE_DOCUMENT_ROOT: /var/www/html/web
         options: >-
           -v ${{ github.workspace }}:/var/www/html:rw
+          --health-cmd="bash -lc 'test -f /var/www/html/web/index.php || exit 1'"
+          --health-interval=5s --health-timeout=5s --health-retries=30
       selenium:
-        image: selenium/standalone-chrome:126.0
+        image: selenium/standalone-chrome:4.23.0-20240726
+        # Publication de port non nécessaire pour la com inter-services, mais inoffensif
+        ports:
+          - 4444:4444
         options: >-
           --shm-size="2g"
+          --health-cmd="curl -s http://localhost:4444/status | grep -q 'ready'"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+          -e SE_NODE_MAX_SESSIONS=1
+          -e SE_NODE_SESSION_TIMEOUT=300
 
     steps:
       - uses: actions/checkout@v4
@@ -116,20 +125,66 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      - name: Wait for Selenium service
+      # curl/jq ne sont pas garantis dans l'image du job : on les installe (Ubuntu/Debian)
+      - name: Install curl & jq in job container
         run: |
-          php -r '$u="http://selenium:4444/status"; for($i=0;$i<60;$i++){ $j=@file_get_contents($u); if($j && strpos($j,"\"ready\":true")!==false){ echo "Selenium ready\n"; exit(0);} echo "Waiting Selenium...\n"; sleep(2);} exit(1);'
+          if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+            apt-get update -y
+            DEBIAN_FRONTEND=noninteractive apt-get install -y curl jq
+          fi
 
-      - name: Wait for web service
+      - name: Wait for Selenium service (robust)
         run: |
-          php -r '$u="http://web/"; for($i=0;$i<60;$i++){ $c=@file_get_contents($u); if($c!==false){ echo "Web ready\n"; exit(0);} echo "Waiting Web...\n"; sleep(2);} exit(1);'
+          set -euo pipefail
+          ATTEMPTS=120
+          for i in $(seq 1 $ATTEMPTS); do
+            # Essaye /status (Selenium 4) puis /wd/hub/status (compat)
+            if curl -fsS http://selenium:4444/status | jq -e '.ready == true' >/dev/null 2>&1; then
+              echo "Selenium ready via /status"; exit 0
+            fi
+            if curl -fsS http://selenium:4444/wd/hub/status | jq -e '.value.ready == true' >/dev/null 2>&1; then
+              echo "Selenium ready via /wd/hub/status"; exit 0
+            fi
+            echo "Waiting Selenium... ($i/$ATTEMPTS)"
+            sleep 2
+          done
+          echo "Selenium did not become ready in time."
+          exit 1
 
+      - name: Wait for web service (docroot check)
+        run: |
+          set -euo pipefail
+          ATTEMPTS=60
+          for i in $(seq 1 $ATTEMPTS); do
+            if curl -fsS http://web/ >/dev/null 2>&1; then
+              echo "Web ready"; exit 0
+            fi
+            echo "Waiting Web... ($i/$ATTEMPTS)"
+            sleep 2
+          done
+          echo "Web did not become ready in time."
+          exit 1
+
+      # 🔎 Vérification demandée (pipe exact)
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
       - name: Run Behat (profil CI)
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
+
+      # Diagnostics automatiques en cas d'échec (logs services)
+      - name: Dump Selenium logs on failure
+        if: failure()
+        run: |
+          echo "=== Selenium logs ==="
+          # Affiche les logs du service selenium
+          docker logs "$(docker ps -aqf "name=selenium")" || true
+      - name: Dump Web logs on failure
+        if: failure()
+        run: |
+          echo "=== Apache access/error logs (if available) ==="
+          docker exec "$(docker ps -aqf "name=web")" bash -lc 'tail -n 200 /var/log/apache2/error.log 2>/dev/null || true; tail -n 200 /var/log/apache2/access.log 2>/dev/null || true' || true
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
