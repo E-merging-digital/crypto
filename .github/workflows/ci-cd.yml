@@ -81,7 +81,7 @@ jobs:
       web:
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
-          -v ${{ github.workspace }}:/var/www/html:rw
+          -v ${{ github.workspace }}/web:/var/www/html:rw
       selenium:
         image: selenium/standalone-chrome:latest
         ports:
@@ -92,7 +92,6 @@ jobs:
           --health-interval=5s --health-timeout=5s --health-retries=30
           -e SE_NODE_MAX_SESSIONS=1
           -e SE_NODE_SESSION_TIMEOUT=300
-      # Service DB conservé (non utilisé ici, structure inchangée)
       db:
         image: mariadb:10.6
         env:
@@ -131,13 +130,13 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # === (1) Installer SQLite >= 3.46 de façon déterministe (build source) ===
+      # Build & install SQLite >= 3.46 (déterministe)
       - name: Build & install SQLite 3.46 (job container)
         run: |
           set -euo pipefail
           apt-get update -y
           DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential wget ca-certificates
-          SQLITE_VER=3460000   # 3.46.0 => 3460000 ; (3.47.0 => 3470000 si besoin)
+          SQLITE_VER=3460000   # 3.46.0
           wget -O /tmp/sqlite.tar.gz "https://www.sqlite.org/2024/sqlite-autoconf-${SQLITE_VER}.tar.gz"
           mkdir -p /tmp/sqlite-src && tar -xzf /tmp/sqlite.tar.gz -C /tmp/sqlite-src --strip-components=1
           cd /tmp/sqlite-src
@@ -150,7 +149,7 @@ jobs:
           echo "== PHP SQLite lib version =="
           php -r 'echo (class_exists("SQLite3")? (SQLite3::version()["lib"]??"n/a") : "no-sqlite3-ext"), PHP_EOL;'
 
-      # Préparer settings.php pour SQLite
+      # settings.php pour SQLite + trusted hosts larges
       - name: Prepare Drupal settings.php for CI (SQLite)
         run: |
           set -e
@@ -164,12 +163,14 @@ jobs:
             echo "];"
             echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
             echo "\$settings['trusted_host_patterns'][] = '^web$';"
+            echo "\$settings['trusted_host_patterns'][] = '^localhost$';"
+            echo "\$settings['trusted_host_patterns'][] = '^127\\\\.0\\\\.0\\\\.1$';"
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      # Installer Drupal (SQLite) – la lib >= 3.46 est désormais chargée par PHP
+      # Installer Drupal (SQLite) avant Behat
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
@@ -200,21 +201,21 @@ jobs:
           echo "Selenium did not become ready in time."
           exit 1
 
-      - name: Wait for web service (TCP check)
+      - name: Wait for web service (HTTP 200 check)
         run: |
           set -euo pipefail
           ATTEMPTS=60
           for i in $(seq 1 $ATTEMPTS); do
-            if curl -s --max-time 2 http://web/ >/dev/null 2>&1; then
-              echo "Web reachable"; exit 0
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://web/)
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
+              echo "Web responded with HTTP $CODE"; exit 0
             fi
-            echo "Waiting Web... ($i/$ATTEMPTS)"
+            echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
             sleep 2
           done
           echo "Web did not become reachable in time."
           exit 1
 
-      # Vérification demandée
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
@@ -222,26 +223,15 @@ jobs:
       - name: Run Behat (profil CI)
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
-      # Étapes de logs (si docker CLI indisponible dans le job container, on skip proprement)
       - name: Dump Selenium logs on failure
         if: failure()
         run: |
-          if command -v docker >/dev/null 2>&1; then
-            echo "=== Selenium logs ==="
-            docker logs "$(docker ps -aqf "name=selenium")" || true
-          else
-            echo "docker CLI not available in container job; skipping Selenium logs."
-          fi
+          echo "Selenium logs are unavailable (no docker CLI in container job). Skipping."
 
       - name: Dump Web logs on failure
         if: failure()
         run: |
-          if command -v docker >/dev/null 2>&1; then
-            echo "=== Apache access/error logs (if available) ==="
-            docker exec "$(docker ps -aqf "name=web")" bash -lc 'tail -n 200 /var/log/apache2/error.log 2>/dev/null || true; tail -n 200 /var/log/apache2/access.log 2>/dev/null || true' || true
-          else
-            echo "docker CLI not available in container job; skipping Web logs."
-          fi
+          echo "Web logs are unavailable (no docker CLI in container job). Skipping."
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
