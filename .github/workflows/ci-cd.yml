@@ -92,6 +92,7 @@ jobs:
           --health-interval=5s --health-timeout=5s --health-retries=30
           -e SE_NODE_MAX_SESSIONS=1
           -e SE_NODE_SESSION_TIMEOUT=300
+      # MariaDB facultatif (non utilisé par les tests ci-dessous, conservé pour la structure)
       db:
         image: mariadb:10.6
         env:
@@ -130,68 +131,64 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # (1) Installer pdo_mysql (PHP 8.3) dans le conteneur du job via Sury + client MariaDB
-      - name: Enable Sury PHP repo & install pdo_mysql (job container)
+      # ---- [JOB CONTAINER] Mise à niveau SQLite >= 3.45 + extension PHP sqlite3
+      - name: Upgrade SQLite (job container) & ensure php-sqlite3
         run: |
           set -e
+          . /etc/os-release
+          echo "deb http://deb.debian.org/debian ${VERSION_CODENAME}-backports main" > /etc/apt/sources.list.d/backports.list
           apt-get update -y
-          apt-get install -y ca-certificates apt-transport-https gnupg curl lsb-release
-          curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury.gpg
-          echo "deb https://packages.sury.org/php/ $(. /etc/os-release; echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/sury-php.list
-          apt-get update -y
-          DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-mysql mariadb-client
-          echo "== PHP modules (job container) =="
-          php -m | grep -i -E 'pdo_mysql|mysqli' || true
+          DEBIAN_FRONTEND=noninteractive apt-get -y -t ${VERSION_CODENAME}-backports install libsqlite3-0 sqlite3 || true
+          # Installer l'extension PHP sqlite3 si absente (8.3, 8.2 ou générique)
+          if ! php -m | grep -qi sqlite3; then
+            if apt-cache show php8.3-sqlite3 >/dev/null 2>&1; then
+              DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-sqlite3
+            elif apt-cache show php8.2-sqlite3 >/dev/null 2>&1; then
+              DEBIAN_FRONTEND=noninteractive apt-get install -y php8.2-sqlite3
+            else
+              DEBIAN_FRONTEND=noninteractive apt-get install -y php-sqlite3 || true
+            fi
+          fi
+          echo "sqlite3 CLI version:"; sqlite3 --version || true
+          echo "PHP SQLite3 lib version:"
+          php -r 'echo (class_exists("SQLite3")? (SQLite3::version()["lib"]??"n/a") : "no-sqlite3-ext"), PHP_EOL;'
 
-      # (2) Installer pdo_mysql dans le service "web" (même image) puis recharger Apache si présent
-      - name: Install pdo_mysql in web service container
+      # ---- [SERVICE WEB] Mise à niveau SQLite >= 3.45 + extension PHP sqlite3
+      - name: Upgrade SQLite (web service) & ensure php-sqlite3
         run: |
           set -e
           WEB_CID="$(docker ps -aqf "name=web")"
-          if [ -n "$WEB_CID" ]; then
-            docker exec "$WEB_CID" bash -lc '
-              set -e
-              apt-get update -y
-              apt-get install -y ca-certificates apt-transport-https gnupg curl lsb-release
-              curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury.gpg
-              echo "deb https://packages.sury.org/php/ $(. /etc/os-release; echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/sury-php.list
-              apt-get update -y
-              DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-mysql
-              echo "== PHP modules (web service) =="
-              php -m | grep -i -E "pdo_mysql|mysqli" || true
-              (command -v apache2ctl && apache2ctl -k graceful) || (command -v service && service apache2 reload) || true
-            '
-          else
-            echo "Web service container not found"; exit 1
-          fi
-
-      - name: Wait for MariaDB service
-        run: |
-          set -e
-          ATTEMPTS=30
-          for i in $(seq 1 $ATTEMPTS); do
-            if mysqladmin ping -h db -uroot -proot --silent; then
-              echo "MariaDB ready"; exit 0
+          if [ -z "$WEB_CID" ]; then echo "Web service container not found"; exit 1; fi
+          docker exec "$WEB_CID" bash -lc '
+            set -e
+            . /etc/os-release
+            echo "deb http://deb.debian.org/debian ${VERSION_CODENAME}-backports main" > /etc/apt/sources.list.d/backports.list
+            apt-get update -y
+            DEBIAN_FRONTEND=noninteractive apt-get -y -t ${VERSION_CODENAME}-backports install libsqlite3-0 sqlite3 || true
+            if ! php -m | grep -qi sqlite3; then
+              if apt-cache show php8.3-sqlite3 >/dev/null 2>&1; then
+                DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-sqlite3
+              elif apt-cache show php8.2-sqlite3 >/dev/null 2>&1; then
+                DEBIAN_FRONTEND=noninteractive apt-get install -y php8.2-sqlite3
+              else
+                DEBIAN_FRONTEND=noninteractive apt-get install -y php-sqlite3 || true
+              fi
             fi
-            echo "Waiting MariaDB... ($i/$ATTEMPTS)"
-            sleep 2
-          done
-          echo "MariaDB did not become ready in time."
-          exit 1
+            echo "sqlite3 CLI version:"; sqlite3 --version || true
+            echo "PHP SQLite3 lib version:"; php -r "echo (class_exists(\"SQLite3\")? (SQLite3::version()[\"lib\"]??\"n/a\") : \"no-sqlite3-ext\"), PHP_EOL;"
+            (command -v apache2ctl && apache2ctl -k graceful) || (command -v service && service apache2 reload) || true
+          '
 
-      - name: Prepare Drupal settings.php for CI
+      # Préparer settings.php pour SQLite (api_driver BrowserKit/Drupal OK)
+      - name: Prepare Drupal settings.php for CI (SQLite)
         run: |
           set -e
           cp web/sites/default/default.settings.php web/sites/default/settings.php
           {
             echo ""
             echo "\$databases['default']['default'] = ["
-            echo "  'driver' => 'mysql',"
-            echo "  'host' => 'db',"
-            echo "  'port' => '3306',"
-            echo "  'database' => 'ci_crypto',"
-            echo "  'username' => 'root',"
-            echo "  'password' => 'root',"
+            echo "  'driver' => 'sqlite',"
+            echo "  'database' => __DIR__ . '/files/.ht.sqlite',"
             echo "  'prefix' => '',"
             echo "];"
             echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
@@ -199,11 +196,13 @@ jobs:
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
+          php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      - name: Install Drupal (MariaDB) via Drush
+      # Installer Drupal (SQLite) pour éviter 403 et avoir un site prêt pour Behat
+      - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
-          ../vendor/bin/drush si minimal -y --db-url=mysql://root:root@db/ci_crypto --site-name="CI Crypto" --account-name=admin --account-pass=admin
+          ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
       - name: Install curl & jq in job container
