@@ -130,6 +130,18 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
+      # Installer l'extension PDO MySQL (sinon PDO::MYSQL_ATTR_USE_BUFFERED_QUERY manquant)
+      - name: Install PHP MySQL extension (pdo_mysql)
+        run: |
+          set -e
+          apt-get update -y
+          if apt-cache show php8.3-mysql >/dev/null 2>&1; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-mysql
+          else
+            DEBIAN_FRONTEND=noninteractive apt-get install -y php-mysql
+          fi
+          php -m | grep -E 'pdo_mysql|mysqli' || true
+
       - name: Wait for MariaDB service
         run: |
           set -e
