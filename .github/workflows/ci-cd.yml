@@ -121,6 +121,24 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
+      # Préparer un settings.php minimal pour l'api_driver: drupal (BrowserKit)
+      - name: Prepare Drupal settings.php for CI
+        run: |
+          set -e
+          cp web/sites/default/default.settings.php web/sites/default/settings.php
+          {
+            echo ""
+            echo "\$databases['default']['default'] = ["
+            echo "  'driver' => 'sqlite',"
+            echo "  'database' => __DIR__ . '/../../../sites/default/files/.ht.sqlite',"
+            echo "  'prefix' => '',"
+            echo "];"
+            echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
+            echo "\$settings['trusted_host_patterns'][] = '^web$';"
+          } >> web/sites/default/settings.php
+          mkdir -p web/sites/default/files
+          chmod -R 777 web/sites/default/files
+
       # curl/jq ne sont pas garantis dans l'image du job : on les installe (Ubuntu/Debian)
       - name: Install curl & jq in job container
         run: |
