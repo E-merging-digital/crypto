@@ -92,6 +92,16 @@ jobs:
           --health-interval=5s --health-timeout=5s --health-retries=30
           -e SE_NODE_MAX_SESSIONS=1
           -e SE_NODE_SESSION_TIMEOUT=300
+      db:
+        image: mariadb:10.6
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ci_crypto
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -proot --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=30
 
     steps:
       - uses: actions/checkout@v4
@@ -120,24 +130,22 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # AJOUT 1 : SQLite >= 3.45 pour Drupal 11 (via backports si Debian)
-      - name: Upgrade SQLite runtime (libsqlite3 >= 3.45) & CLI
+      - name: Wait for MariaDB service
         run: |
           set -e
-          . /etc/os-release
-          if grep -qi debian <<< "$ID"; then
-            echo "deb http://deb.debian.org/debian ${VERSION_CODENAME}-backports main" > /etc/apt/sources.list.d/backports.list
-            apt-get update -y
-            DEBIAN_FRONTEND=noninteractive apt-get -y -t ${VERSION_CODENAME}-backports install libsqlite3-0 sqlite3
-          else
-            apt-get update -y
-            DEBIAN_FRONTEND=noninteractive apt-get install -y libsqlite3-0 sqlite3
-          fi
-          echo "sqlite3 CLI:" && sqlite3 --version || true
-          php -r 'echo "PHP SQLite3 lib: "; $v=SQLite3::version(); echo $v["lib"]??"n/a"; echo PHP_EOL;'
-        # Drupal 11 => SQLite >= 3.45 ; Debian 12 fournit 3.40.1 par défaut.
+          apt-get update -y
+          DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-client
+          ATTEMPTS=30
+          for i in $(seq 1 $ATTEMPTS); do
+            if mysqladmin ping -h db -uroot -proot --silent; then
+              echo "MariaDB ready"; exit 0
+            fi
+            echo "Waiting MariaDB... ($i/$ATTEMPTS)"
+            sleep 2
+          done
+          echo "MariaDB did not become ready in time."
+          exit 1
 
-      # Préparer un settings.php minimal pour l'api_driver: drupal (BrowserKit)
       - name: Prepare Drupal settings.php for CI
         run: |
           set -e
@@ -145,8 +153,12 @@ jobs:
           {
             echo ""
             echo "\$databases['default']['default'] = ["
-            echo "  'driver' => 'sqlite',"
-            echo "  'database' => __DIR__ . '/files/.ht.sqlite',"
+            echo "  'driver' => 'mysql',"
+            echo "  'host' => 'db',"
+            echo "  'port' => '3306',"
+            echo "  'database' => 'ci_crypto',"
+            echo "  'username' => 'root',"
+            echo "  'password' => 'root',"
             echo "  'prefix' => '',"
             echo "];"
             echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
@@ -154,13 +166,11 @@ jobs:
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
-          php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      # AJOUT 2 : installer Drupal avant Behat (évite 403 et valide drush si)
-      - name: Install Drupal (SQLite) via Drush
+      - name: Install Drupal (MariaDB) via Drush
         working-directory: web
         run: |
-          ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
+          ../vendor/bin/drush si minimal -y --db-url=mysql://root:root@db/ci_crypto --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
       - name: Install curl & jq in job container
@@ -201,7 +211,6 @@ jobs:
           echo "Web did not become reachable in time."
           exit 1
 
-      # 🔎 Vérification demandée (pipe exact)
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
