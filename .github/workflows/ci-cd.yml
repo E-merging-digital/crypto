@@ -79,13 +79,9 @@ jobs:
 
     services:
       web:
-        image: php:8.3-apache
-        env:
-          APACHE_DOCUMENT_ROOT: /var/www/html/web
+        image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
           -v ${{ github.workspace }}:/var/www/html:rw
-          --health-cmd="bash -lc 'test -f /var/www/html/web/index.php || exit 1'"
-          --health-interval=5s --health-timeout=5s --health-retries=30
       selenium:
         image: selenium/standalone-chrome:latest
         # Publication de port non nécessaire pour la com inter-services, mais inoffensif
@@ -138,7 +134,6 @@ jobs:
           set -euo pipefail
           ATTEMPTS=120
           for i in $(seq 1 $ATTEMPTS); do
-            # Essaye /status (Selenium 4) puis /wd/hub/status (compat)
             if curl -fsS http://selenium:4444/status | jq -e '.ready == true' >/dev/null 2>&1; then
               echo "Selenium ready via /status"; exit 0
             fi
@@ -151,18 +146,18 @@ jobs:
           echo "Selenium did not become ready in time."
           exit 1
 
-      - name: Wait for web service (docroot check)
+      - name: Wait for web service (TCP check)
         run: |
           set -euo pipefail
           ATTEMPTS=60
           for i in $(seq 1 $ATTEMPTS); do
-            if curl -fsS http://web/ >/dev/null 2>&1; then
-              echo "Web ready"; exit 0
+            if curl -s --max-time 2 http://web/ >/dev/null 2>&1; then
+              echo "Web reachable"; exit 0
             fi
             echo "Waiting Web... ($i/$ATTEMPTS)"
             sleep 2
           done
-          echo "Web did not become ready in time."
+          echo "Web did not become reachable in time."
           exit 1
 
       # 🔎 Vérification demandée (pipe exact)
@@ -178,7 +173,6 @@ jobs:
         if: failure()
         run: |
           echo "=== Selenium logs ==="
-          # Affiche les logs du service selenium
           docker logs "$(docker ps -aqf "name=selenium")" || true
       - name: Dump Web logs on failure
         if: failure()
