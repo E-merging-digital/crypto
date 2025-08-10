@@ -71,31 +71,23 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
 
-    # Le job principal tourne dans ton image custom (Composer, extensions, etc.)
     container:
       image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # Services Docker “réseau partagé” accessibles via leurs noms d’hôte.
     services:
-      # Apache/PHP servant /var/www/html/web (DocumentRoot défini via env officiel)
       web:
         image: php:8.3-apache
         env:
           APACHE_DOCUMENT_ROOT: /var/www/html/web
         options: >-
           -v ${{ github.workspace }}:/var/www/html:rw
-          --health-cmd="bash -lc 'test -f /var/www/html/web/index.php || exit 1'"
-          --health-interval=5s --health-timeout=5s --health-retries=30
-      # Selenium pour les scénarios @javascript
       selenium:
         image: selenium/standalone-chrome:126.0
         options: >-
           --shm-size="2g"
-          --health-cmd="curl -s http://localhost:4444/status | grep -q 'ready'"
-          --health-interval=5s --health-timeout=5s --health-retries=20
 
     steps:
       - uses: actions/checkout@v4
@@ -124,21 +116,18 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Attente Selenium sans dépendre de curl dans l'image job
       - name: Wait for Selenium service
         run: |
           php -r '$u="http://selenium:4444/status"; for($i=0;$i<60;$i++){ $j=@file_get_contents($u); if($j && strpos($j,"\"ready\":true")!==false){ echo "Selenium ready\n"; exit(0);} echo "Waiting Selenium...\n"; sleep(2);} exit(1);'
 
-      # (Optionnel) Attente du service web : healthcheck vérifie déjà index.php.
-      - name: Soft wait for web service
-        run: sleep 3
+      - name: Wait for web service
+        run: |
+          php -r '$u="http://web/"; for($i=0;$i<60;$i++){ $c=@file_get_contents($u); if($c!==false){ echo "Web ready\n"; exit(0);} echo "Waiting Web...\n"; sleep(2);} exit(1);'
 
-      # 🔎 Vérification demandée (avec pipe)
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
-      # Exécution Behat avec le profil CI (BrowserKit par défaut, Selenium pour @javascript)
       - name: Run Behat (profil CI)
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
