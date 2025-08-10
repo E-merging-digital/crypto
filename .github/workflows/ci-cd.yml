@@ -84,6 +84,7 @@ jobs:
           -v ${{ github.workspace }}:/var/www/html:rw
       selenium:
         image: selenium/standalone-chrome:latest
+        # Publication de port non nécessaire pour la com inter-services, mais inoffensif
         ports:
           - 4444:4444
         options: >-
@@ -120,7 +121,7 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Préparer un settings.php minimal pour l'api_driver: drupal (BrowserKit)
+      # Préparer un settings.php minimal pour l'api_driver: drupal (BrowserKit) + SQLite
       - name: Prepare Drupal settings.php for CI
         run: |
           set -e
@@ -139,6 +140,14 @@ jobs:
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
+      # Installer Drupal (base minimale) pour éviter les 403 en page d'accueil
+      - name: Install Drupal (SQLite) via Drush
+        working-directory: web
+        run: |
+          ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
+          ../vendor/bin/drush cr
+
+      # curl/jq ne sont pas garantis dans l'image du job : on les installe (Ubuntu/Debian)
       - name: Install curl & jq in job container
         run: |
           if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
@@ -185,6 +194,7 @@ jobs:
       - name: Run Behat (profil CI)
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
+      # Diagnostics automatiques en cas d'échec (logs services)
       - name: Dump Selenium logs on failure
         if: failure()
         run: |
