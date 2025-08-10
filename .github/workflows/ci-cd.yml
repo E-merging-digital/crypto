@@ -71,8 +71,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
 
-    # IMPORTANT : pas de "container:" ici pour partager le workspace avec les services.
+    # IMPORTANT : pas de "container:" ici. On utilise des services réseau Docker.
     services:
+      # On laisse le service web (structure inchangée), mais on NE l'utilise PAS.
       web:
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
@@ -84,6 +85,7 @@ jobs:
         ports:
           - 4444:4444
         options: >-
+          --add-host=host.docker.internal:host-gateway
           --shm-size="2g"
           --health-cmd="curl -s http://localhost:4444/status | grep -q 'ready'"
           --health-interval=5s --health-timeout=5s --health-retries=30
@@ -119,7 +121,7 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Mettre SQLite >= 3.46 pour le job (Drush)
+      # Assure SQLite >= 3.46 pour Drush et PHP CLI (déterministe)
       - name: Build & install SQLite 3.46 for job
         run: |
           set -euo pipefail
@@ -137,30 +139,7 @@ jobs:
           echo "== sqlite3 CLI (job) ==" && sqlite3 --version
           echo "== PHP SQLite lib (job) ==" && php -r 'echo (class_exists("SQLite3")? (SQLite3::version()["lib"]??"n/a") : "no-sqlite3-ext"), PHP_EOL;'
 
-      # Aligner le service "web" : php-sqlite3 + libsqlite3 >= 3.45
-      - name: Enable sqlite in web service
-        run: |
-          set -euo pipefail
-          WEB_CID="$(docker ps -qf 'ancestor=ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git' | head -n1)"
-          if [ -z "$WEB_CID" ]; then echo "Web container not found"; exit 1; fi
-          docker exec "$WEB_CID" bash -lc '
-            set -e
-            . /etc/os-release || true
-            echo "deb http://deb.debian.org/debian ${VERSION_CODENAME:-bookworm}-backports main" > /etc/apt/sources.list.d/backports.list
-            apt-get update -y
-            # libsqlite3 et extension PHP sqlite3 (8.3 si dispo, sinon générique)
-            DEBIAN_FRONTEND=noninteractive apt-get -y -t ${VERSION_CODENAME:-bookworm}-backports install libsqlite3-0 sqlite3 || true
-            if apt-cache show php8.3-sqlite3 >/dev/null 2>&1; then
-              DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-sqlite3
-            else
-              DEBIAN_FRONTEND=noninteractive apt-get install -y php-sqlite3 || true
-            fi
-            php -m | grep -i sqlite3 || (echo "php-sqlite3 not loaded" && exit 1)
-            sqlite3 --version || true
-            (command -v apache2ctl && apache2ctl -k graceful) || true
-          '
-
-      # settings.php pour SQLite + trusted hosts (web, localhost)
+      # settings.php pour SQLite + trusted hosts incluant host.docker.internal
       - name: Prepare Drupal settings.php for CI (SQLite)
         run: |
           set -e
@@ -176,6 +155,7 @@ jobs:
             echo "\$settings['trusted_host_patterns'][] = '^web$';"
             echo "\$settings['trusted_host_patterns'][] = '^localhost$';"
             echo "\$settings['trusted_host_patterns'][] = '^127\\\\.0\\\\.0\\\\.1$';"
+            echo "\$settings['trusted_host_patterns'][] = '^host\\\\.docker\\\\.internal$';"
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
@@ -186,6 +166,27 @@ jobs:
         run: |
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
+
+      # Démarre un serveur PHP local (même workspace que Drush) accessible par Selenium
+      - name: Start PHP built-in server (port 8085)
+        run: |
+          nohup php -S 0.0.0.0:8085 -t web web/index.php >/dev/null 2>&1 &
+          echo $! > /tmp/phpserver.pid
+
+      - name: Wait for local PHP server (expects 2xx)
+        run: |
+          set -euo pipefail
+          ATTEMPTS=60
+          for i in $(seq 1 $ATTEMPTS); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8085/)
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+              echo "Local PHP server responded with HTTP $CODE"; exit 0
+            fi
+            echo "Waiting local server (HTTP $CODE)... ($i/$ATTEMPTS)"
+            sleep 2
+          done
+          echo "Local server did not reach 2xx in time."
+          exit 1
 
       - name: Wait for Selenium service (robust)
         run: |
@@ -204,31 +205,14 @@ jobs:
           echo "Selenium did not become ready in time."
           exit 1
 
-      - name: Wait for web service (expects 200)
-        run: |
-          set -euo pipefail
-          ATTEMPTS=60
-          for i in $(seq 1 $ATTEMPTS); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
-            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
-              echo "Web responded with HTTP $CODE"; exit 0
-            fi
-            echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
-            sleep 2
-          done
-          echo "Web did not become reachable with 2xx in time."
-          exit 1
-
-      # Votre FeatureContext est bien autoloadé
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
-      # IMPORTANT : le profil "ci" doit pointer vers http://localhost:8081
-      # (base_url dans behat.yml). Sinon forcer via profil dédié.
+      # Behat vise le serveur PHP local via host.docker.internal (depuis le conteneur Selenium)
       - name: Run Behat (profil CI)
         env:
-          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://localhost:8081"}}}'
+          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://host.docker.internal:8085"}}}'
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
   deploy:
