@@ -71,17 +71,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
 
-    container:
-      image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
+    # IMPORTANT : pas de "container:" ici pour partager le workspace avec les services.
     services:
       web:
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
           -v ${{ github.workspace }}/web:/var/www/html:rw
+        ports:
+          - 8081:80
       selenium:
         image: selenium/standalone-chrome:latest
         ports:
@@ -92,16 +89,6 @@ jobs:
           --health-interval=5s --health-timeout=5s --health-retries=30
           -e SE_NODE_MAX_SESSIONS=1
           -e SE_NODE_SESSION_TIMEOUT=300
-      db:
-        image: mariadb:10.6
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: ci_crypto
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -uroot -proot --silent"
-          --health-interval=5s --health-timeout=5s --health-retries=30
 
     steps:
       - uses: actions/checkout@v4
@@ -109,47 +96,71 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
 
-      - name: Sanity check shell & PATH
-        run: |
-          command -v bash
-          echo "PATH=$PATH"
+      - name: Setup PHP 8.3 for job (CLI)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, gd, zip, gmp
+          tools: composer
 
-      - name: Cache Composer (in container)
+      - name: Cache Composer (job)
         uses: actions/cache@v4
         with:
           path: |
-            /github/home/.composer/cache
+            ~/.composer/cache
             vendor
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
             ${{ runner.os }}-composer-
 
-      - name: Install dev dependencies
+      - name: Install dev dependencies (job)
         run: composer install --prefer-dist --no-interaction --optimize-autoloader
 
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Build & install SQLite >= 3.46 (déterministe)
-      - name: Build & install SQLite 3.46 (job container)
+      # Mettre SQLite >= 3.46 pour le job (Drush)
+      - name: Build & install SQLite 3.46 for job
         run: |
           set -euo pipefail
-          apt-get update -y
-          DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential wget ca-certificates
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential wget ca-certificates
           SQLITE_VER=3460000   # 3.46.0
           wget -O /tmp/sqlite.tar.gz "https://www.sqlite.org/2024/sqlite-autoconf-${SQLITE_VER}.tar.gz"
           mkdir -p /tmp/sqlite-src && tar -xzf /tmp/sqlite.tar.gz -C /tmp/sqlite-src --strip-components=1
           cd /tmp/sqlite-src
           ./configure --prefix=/usr/local
           make -j"$(nproc)"
-          make install
-          echo "/usr/local/lib" > /etc/ld.so.conf.d/zz-local-sqlite3.conf
-          ldconfig
-          echo "== sqlite3 CLI ==" && sqlite3 --version
-          echo "== PHP SQLite lib version =="
-          php -r 'echo (class_exists("SQLite3")? (SQLite3::version()["lib"]??"n/a") : "no-sqlite3-ext"), PHP_EOL;'
+          sudo make install
+          echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/zz-local-sqlite3.conf
+          sudo ldconfig
+          echo "== sqlite3 CLI (job) ==" && sqlite3 --version
+          echo "== PHP SQLite lib (job) ==" && php -r 'echo (class_exists("SQLite3")? (SQLite3::version()["lib"]??"n/a") : "no-sqlite3-ext"), PHP_EOL;'
 
-      # settings.php pour SQLite + trusted hosts larges
+      # Aligner le service "web" : php-sqlite3 + libsqlite3 >= 3.45
+      - name: Enable sqlite in web service
+        run: |
+          set -euo pipefail
+          WEB_CID="$(docker ps -qf 'ancestor=ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git' | head -n1)"
+          if [ -z "$WEB_CID" ]; then echo "Web container not found"; exit 1; fi
+          docker exec "$WEB_CID" bash -lc '
+            set -e
+            . /etc/os-release || true
+            echo "deb http://deb.debian.org/debian ${VERSION_CODENAME:-bookworm}-backports main" > /etc/apt/sources.list.d/backports.list
+            apt-get update -y
+            # libsqlite3 et extension PHP sqlite3 (8.3 si dispo, sinon générique)
+            DEBIAN_FRONTEND=noninteractive apt-get -y -t ${VERSION_CODENAME:-bookworm}-backports install libsqlite3-0 sqlite3 || true
+            if apt-cache show php8.3-sqlite3 >/dev/null 2>&1; then
+              DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-sqlite3
+            else
+              DEBIAN_FRONTEND=noninteractive apt-get install -y php-sqlite3 || true
+            fi
+            php -m | grep -i sqlite3 || (echo "php-sqlite3 not loaded" && exit 1)
+            sqlite3 --version || true
+            (command -v apache2ctl && apache2ctl -k graceful) || true
+          '
+
+      # settings.php pour SQLite + trusted hosts (web, localhost)
       - name: Prepare Drupal settings.php for CI (SQLite)
         run: |
           set -e
@@ -170,29 +181,21 @@ jobs:
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      # Installer Drupal (SQLite) avant Behat
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
-      - name: Install curl & jq in job container
-        run: |
-          if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
-            apt-get update -y
-            DEBIAN_FRONTEND=noninteractive apt-get install -y curl jq
-          fi
-
       - name: Wait for Selenium service (robust)
         run: |
           set -euo pipefail
           ATTEMPTS=120
           for i in $(seq 1 $ATTEMPTS); do
-            if curl -fsS http://selenium:4444/status | jq -e '.ready == true' >/dev/null 2>&1; then
+            if curl -fsS http://localhost:4444/status | jq -e '.ready == true' >/dev/null 2>&1; then
               echo "Selenium ready via /status"; exit 0
             fi
-            if curl -fsS http://selenium:4444/wd/hub/status | jq -e '.value.ready == true' >/dev/null 2>&1; then
+            if curl -fsS http://localhost:4444/wd/hub/status | jq -e '.value.ready == true' >/dev/null 2>&1; then
               echo "Selenium ready via /wd/hub/status"; exit 0
             fi
             echo "Waiting Selenium... ($i/$ATTEMPTS)"
@@ -201,37 +204,32 @@ jobs:
           echo "Selenium did not become ready in time."
           exit 1
 
-      - name: Wait for web service (HTTP 200 check)
+      - name: Wait for web service (expects 200)
         run: |
           set -euo pipefail
           ATTEMPTS=60
           for i in $(seq 1 $ATTEMPTS); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://web/)
-            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
               echo "Web responded with HTTP $CODE"; exit 0
             fi
             echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
             sleep 2
           done
-          echo "Web did not become reachable in time."
+          echo "Web did not become reachable with 2xx in time."
           exit 1
 
+      # Votre FeatureContext est bien autoloadé
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
+      # IMPORTANT : le profil "ci" doit pointer vers http://localhost:8081
+      # (base_url dans behat.yml). Sinon forcer via profil dédié.
       - name: Run Behat (profil CI)
+        env:
+          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://localhost:8081"}}}'
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
-
-      - name: Dump Selenium logs on failure
-        if: failure()
-        run: |
-          echo "Selenium logs are unavailable (no docker CLI in container job). Skipping."
-
-      - name: Dump Web logs on failure
-        if: failure()
-        run: |
-          echo "Web logs are unavailable (no docker CLI in container job). Skipping."
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
