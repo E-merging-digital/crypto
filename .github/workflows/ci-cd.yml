@@ -130,23 +130,44 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Installer l'extension PDO MySQL (sinon PDO::MYSQL_ATTR_USE_BUFFERED_QUERY manquant)
-      - name: Install PHP MySQL extension (pdo_mysql)
+      # (1) Installer pdo_mysql (PHP 8.3) dans le conteneur du job via Sury + client MariaDB
+      - name: Enable Sury PHP repo & install pdo_mysql (job container)
         run: |
           set -e
           apt-get update -y
-          if apt-cache show php8.3-mysql >/dev/null 2>&1; then
-            DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-mysql
+          apt-get install -y ca-certificates apt-transport-https gnupg curl lsb-release
+          curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury.gpg
+          echo "deb https://packages.sury.org/php/ $(. /etc/os-release; echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/sury-php.list
+          apt-get update -y
+          DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-mysql mariadb-client
+          echo "== PHP modules (job container) =="
+          php -m | grep -i -E 'pdo_mysql|mysqli' || true
+
+      # (2) Installer pdo_mysql dans le service "web" (même image) puis recharger Apache si présent
+      - name: Install pdo_mysql in web service container
+        run: |
+          set -e
+          WEB_CID="$(docker ps -aqf "name=web")"
+          if [ -n "$WEB_CID" ]; then
+            docker exec "$WEB_CID" bash -lc '
+              set -e
+              apt-get update -y
+              apt-get install -y ca-certificates apt-transport-https gnupg curl lsb-release
+              curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/sury.gpg
+              echo "deb https://packages.sury.org/php/ $(. /etc/os-release; echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/sury-php.list
+              apt-get update -y
+              DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-mysql
+              echo "== PHP modules (web service) =="
+              php -m | grep -i -E "pdo_mysql|mysqli" || true
+              (command -v apache2ctl && apache2ctl -k graceful) || (command -v service && service apache2 reload) || true
+            '
           else
-            DEBIAN_FRONTEND=noninteractive apt-get install -y php-mysql
+            echo "Web service container not found"; exit 1
           fi
-          php -m | grep -E 'pdo_mysql|mysqli' || true
 
       - name: Wait for MariaDB service
         run: |
           set -e
-          apt-get update -y
-          DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-client
           ATTEMPTS=30
           for i in $(seq 1 $ATTEMPTS); do
             if mysqladmin ping -h db -uroot -proot --silent; then
@@ -223,6 +244,7 @@ jobs:
           echo "Web did not become reachable in time."
           exit 1
 
+      # 🔎 Vérification demandée (pipe exact)
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
