@@ -29,7 +29,7 @@ jobs:
         with:
           php-version: '8.3'
           coverage: none
-          extensions: xml, gd, mysqli, zip, gmp, sqlite3, pdo_sqlite
+          extensions: xml, gd, mysqli, zip, gmp
           tools: composer
 
       - name: Show loaded PHP modules (debug)
@@ -120,7 +120,7 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # --- SQLite >= 3.45 pour Drupal 11 (Bookworm backports) ---
+      # --- AJOUT 1 : SQLite >= 3.45 requis par Drupal 11 ---
       - name: Upgrade SQLite runtime (libsqlite3 >= 3.45) & CLI
         run: |
           set -e
@@ -128,10 +128,8 @@ jobs:
           if grep -qi debian <<< "$ID"; then
             echo "deb http://deb.debian.org/debian ${VERSION_CODENAME}-backports main" > /etc/apt/sources.list.d/backports.list
             apt-get update -y
-            # libsqlite3-0 et sqlite3 depuis backports (>= 3.45)
             DEBIAN_FRONTEND=noninteractive apt-get -y -t ${VERSION_CODENAME}-backports install libsqlite3-0 sqlite3
           else
-            # Cas Ubuntu/Dérivés
             apt-get update -y
             DEBIAN_FRONTEND=noninteractive apt-get install -y libsqlite3-0 sqlite3
           fi
@@ -139,8 +137,9 @@ jobs:
           sqlite3 --version || true
           echo "PHP SQLite3::version():"
           php -r 'echo json_encode(SQLite3::version(), JSON_PRETTY_PRINT), PHP_EOL;'
+        # Réf. exigences SQLite >= 3.45 pour Drupal 11.
 
-      # Préparer un settings.php minimal pour l'api_driver: drupal (BrowserKit) + SQLite
+      # Préparer un settings.php minimal pour l'api_driver: drupal (BrowserKit)
       - name: Prepare Drupal settings.php for CI
         run: |
           set -e
@@ -159,14 +158,13 @@ jobs:
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      # Installer Drupal (base minimale) pour éviter les 403 en page d'accueil
+      # --- AJOUT 2 : Installer Drupal pour éviter le 403 en page d'accueil ---
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
-      # curl/jq peuvent manquer dans l'image du job : on les installe
       - name: Install curl & jq in job container
         run: |
           if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
@@ -213,7 +211,6 @@ jobs:
       - name: Run Behat (profil CI)
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
-      # Diagnostics automatiques en cas d'échec (logs services)
       - name: Dump Selenium logs on failure
         if: failure()
         run: |
