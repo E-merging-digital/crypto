@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [main]
 
+# Toujours exécuter sous bash
 defaults:
   run:
     shell: bash
@@ -20,21 +21,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "${{ github.workspace }}"
-
-      - name: Setup PHP 8.3
+      - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
           coverage: none
           extensions: xml, gd, mysqli, zip, gmp
           tools: composer
-
       - name: Show loaded PHP modules (debug)
         run: php -m | head -n 200
-
       - name: Cache Composer dependencies
         uses: actions/cache@v4
         with:
@@ -44,21 +41,16 @@ jobs:
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
             ${{ runner.os }}-composer-
-
       - name: Install project dependencies
         run: composer install --prefer-dist --no-interaction --optimize-autoloader
-
       - name: Prepare Drupal test output directories
         run: |
           mkdir -p web/sites/simpletest/browser_output
           chmod -R 775 web/sites/simpletest
-
       - name: Ensure run-tests.sh is executable
-        run: test -f scripts/run-tests.sh && chmod +x scripts/run-tests.sh || true
-
+        run: chmod +x scripts/run-tests.sh
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
-
       - name: Run GrumPHP (lint + static analysis + PHPUnit)
         env:
           SIMPLETEST_BASE_URL: http://127.0.0.1:8080
@@ -71,9 +63,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
 
+    container:
+      image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
     services:
       web:
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
+        # Monte la racine Drupal (web), vendor et autoload.php dans /var/www
         options: >-
           --name web
           -v ${{ github.workspace }}/web:/var/www/html:rw
@@ -82,82 +81,48 @@ jobs:
         ports:
           - 8081:80
       selenium:
-        image: selenium/standalone-chrome:latest
+        image: selenium/standalone-chrome:126.0
         ports:
           - 4444:4444
         options: >-
           --shm-size="2g"
-          --health-cmd="curl -s http://localhost:4444/status | grep -q 'ready'"
-          --health-interval=5s --health-timeout=5s --health-retries=30
-          -e SE_NODE_MAX_SESSIONS=1
-          -e SE_NODE_SESSION_TIMEOUT=300
+          --health-cmd="curl -s http://localhost:4444/status | grep -q '\"ready\":true'"
+          --health-interval=5s --health-timeout=5s --health-retries=20
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
-
-      - name: Setup PHP 8.3 for job (CLI)
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: sqlite3, pdo_sqlite, gd, zip, gmp
-          tools: composer
-
-      - name: Cache Composer (job)
+      - name: Sanity check shell & PATH
+        run: |
+          command -v bash
+          echo "PATH=$PATH"
+      - name: Cache Composer (in container)
         uses: actions/cache@v4
         with:
           path: |
-            ~/.composer/cache
+            /github/home/.composer/cache
             vendor
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
             ${{ runner.os }}-composer-
-
-      - name: Install dev dependencies (job)
+      - name: Install dev dependencies
         run: composer install --prefer-dist --no-interaction --optimize-autoloader
-
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
-
-      # SQLite >= 3.46 côté runner pour l'install Drush
-      - name: Build & preload SQLite 3.46 for runner
-        run: |
-          set -euo pipefail
-          sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential wget ca-certificates
-          SQLITE_VER=3460000
-          wget -O /tmp/sqlite.tar.gz "https://www.sqlite.org/2024/sqlite-autoconf-${SQLITE_VER}.tar.gz"
-          mkdir -p /tmp/sqlite-src && tar -xzf /tmp/sqlite.tar.gz -C /tmp/sqlite-src --strip-components=1
-          cd /tmp/sqlite-src
-          ./configure --prefix=/usr/local CFLAGS="-O2 -fPIC -DSQLITE_ENABLE_COLUMN_METADATA=1 -DSQLITE_ENABLE_JSON1=1"
-          make -j"$(nproc)"
-          sudo make install
-          echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/zz-local-sqlite3.conf
-          sudo ldconfig
-          echo "LD_PRELOAD=/usr/local/lib/libsqlite3.so.0" >> "$GITHUB_ENV"
-          sqlite3 --version
-
-      # Garantit index.php et .htaccess (sans script composer)
+      # Garantit index.php et .htaccess avant installation
       - name: Ensure Drupal scaffold files exist
         run: |
           set -e
           if [ ! -f web/index.php ]; then
-            if [ -f vendor/drupal/core/assets/scaffold/files/index.php ]; then
-              cp vendor/drupal/core/assets/scaffold/files/index.php web/index.php
-            else
-              echo "ERROR: vendor/drupal/core/assets/scaffold/files/index.php introuvable"; exit 1
-            fi
+            cp vendor/drupal/core/assets/scaffold/files/index.php web/index.php
           fi
           if [ ! -f web/.htaccess ] && [ -f vendor/drupal/core/assets/scaffold/files/htaccess ]; then
             cp vendor/drupal/core/assets/scaffold/files/htaccess web/.htaccess
           fi
           ls -l web/index.php
-          ls -l web/.htaccess || true
-
-      # settings.php : DB + hosts + front page publique (/user/login)
-      - name: Prepare Drupal settings.php for CI (SQLite + front override)
+      # Prépare settings.php (SQLite et page d’accueil publique)
+      - name: Prepare Drupal settings.php for CI
         run: |
           set -e
           cp web/sites/default/default.settings.php web/sites/default/settings.php
@@ -178,48 +143,30 @@ jobs:
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
-
-      # Installer Drupal (SQLite) via Drush
+      # Installe Drupal via Drush (SQLite)
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
           set -e
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
-
-      # Debug rapide si encore un souci d'accès
-      - name: Debug presence of index.php and permissions
+      # Attend que le service web et Selenium soient prêts
+      - name: Wait for services (web & selenium)
         run: |
-          set -e
-          echo "== ls web =="
-          ls -la web | head -n 80
-          echo "== head -n 20 web/index.php =="
-          head -n 20 web/index.php || true
-
-      # ✅ Attente 2xx sur /user/login
-      - name: Wait for web service (expects 2xx on /user/login)
-        run: |
-          set -euo pipefail
-          ATTEMPTS=60
-          for i in $(seq 1 $ATTEMPTS); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/user/login)
-            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
-              echo "Web responded with HTTP $CODE on /user/login"; exit 0
-            fi
-            echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
-            sleep 2
+          for i in {1..60}; do
+            curl -fsS http://web/user/login >/dev/null && echo "Web ready" && break || true
+            echo "Waiting for web..."; sleep 2
           done
-          echo "Web did not reach 2xx in time."
-          exit 1
-
+          for i in {1..60}; do
+            curl -s http://selenium:4444/status | grep -q '"ready":true' && echo "Selenium ready" && break || true
+            echo "Waiting for Selenium..."; sleep 2
+          done
+      # Vérifie que le FeatureContext se charge
       - name: Verify FeatureContext autoload
         run: |
-          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
-
-      # Behat sur le service web (port 8081)
+          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\\\Tests\\\\Behat\\\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
+      # Exécute Behat (profil CI) avec base_url par défaut (profil 'ci' pointe vers web)
       - name: Run Behat (profil CI)
-        env:
-          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://localhost:8081"}}}'
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
   deploy:
@@ -229,36 +176,28 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up SSH for private deploy
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
-
       - name: PHP & Composer
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
           tools: composer
-
       - name: Composer install for deploy (no dev)
         run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
-
       - name: Build theme assets (si thème custom existe)
         working-directory: web/themes/custom
         run: |
           if [ -f package.json ]; then npm ci && npm run build; else echo "No theme build"; fi
-
       - name: Push sur le repo de production
         run: |
           git config --global user.email "github-actions@github.com"
           git config --global user.name "GitHub CI"
           git remote add production ${{ secrets.PRODUCTION_SSH_REPO }}
           git push production main:main --force-with-lease
-
       - name: Run Drush post-deploy
-        env:
-          PROD_SSH: ${{ secrets.PROD_SSH }}
         run: |
-          ssh -o StrictHostKeyChecking=no "$PROD_SSH" \
+          ssh -o StrictHostKeyChecking=no ${{ secrets.PROD_SSH }} \
             "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
