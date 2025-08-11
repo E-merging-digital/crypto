@@ -96,6 +96,7 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
 
+      # PHP CLI côté runner pour Drush (avec pdo_sqlite/sqlite3)
       - name: Setup PHP 8.3 for job (CLI)
         uses: shivammathur/setup-php@v2
         with:
@@ -119,7 +120,26 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      - name: Prepare Drupal settings.php for CI (SQLite)
+      # Assure SQLite >= 3.46 côté runner (évite erreurs d'install Drush)
+      - name: Build & preload SQLite 3.46 for runner
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential wget ca-certificates
+          SQLITE_VER=3460000
+          wget -O /tmp/sqlite.tar.gz "https://www.sqlite.org/2024/sqlite-autoconf-${SQLITE_VER}.tar.gz"
+          mkdir -p /tmp/sqlite-src && tar -xzf /tmp/sqlite.tar.gz -C /tmp/sqlite-src --strip-components=1
+          cd /tmp/sqlite-src
+          ./configure --prefix=/usr/local CFLAGS="-O2 -fPIC -DSQLITE_ENABLE_COLUMN_METADATA=1 -DSQLITE_ENABLE_JSON1=1"
+          make -j"$(nproc)"
+          sudo make install
+          echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/zz-local-sqlite3.conf
+          sudo ldconfig
+          echo "LD_PRELOAD=/usr/local/lib/libsqlite3.so.0" >> "$GITHUB_ENV"
+          sqlite3 --version
+
+      # settings.php : DB + trusted hosts + front page publique (override)
+      - name: Prepare Drupal settings.php for CI (SQLite + front override)
         run: |
           set -e
           cp web/sites/default/default.settings.php web/sites/default/settings.php
@@ -133,26 +153,22 @@ jobs:
             echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
             echo "\$settings['trusted_host_patterns'][] = '^web$';"
             echo "\$settings['trusted_host_patterns'][] = '^localhost$';"
-            echo "\$settings['trusted_host_patterns'][] = '^127\\\\.0\\\\.0\\\\.1$';"
             echo "\$settings['trusted_host_patterns'][] = '^localhost(:[0-9]+)?$';"
+            echo "\$settings['trusted_host_patterns'][] = '^127\\\\.0\\\\.0\\\\.1$';"
+            echo "\$config['system.site']['page']['front'] = '/user/login';"
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
+      # Installer Drupal (SQLite) via Drush (runner avec LD_PRELOAD actif)
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
-
-      # ⚙️ Front page publique pour éviter le 403 du profil "minimal"
-      - name: Make front page public (use /user/login)
-        working-directory: web
-        run: |
-          ../vendor/bin/drush cset system.site page.front /user/login -y
           ../vendor/bin/drush cr
 
-      # ✅ Vérifie que le service Apache répond en 200 sur /
+      # Vérifier que le service Apache répond en 2xx sur /
       - name: Wait for web service (expects 2xx)
         run: |
           set -euo pipefail
@@ -172,6 +188,7 @@ jobs:
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
+      # Behat vise le service web local (port mappé)
       - name: Run Behat (profil CI)
         env:
           BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://localhost:8081"}}}'
