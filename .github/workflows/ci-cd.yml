@@ -160,7 +160,8 @@ jobs:
           done
 
       - name: Verify FeatureContext autoload
-        run: php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
+        run: |
+          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
       - name: Run Behat (profil CI)
         env:
