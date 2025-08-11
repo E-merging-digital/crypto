@@ -75,6 +75,7 @@ jobs:
       web:
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
+          --name web
           -v ${{ github.workspace }}/web:/var/www/html:rw
           -v ${{ github.workspace }}/vendor:/var/www/vendor:ro
           -v ${{ github.workspace }}/autoload.php:/var/www/autoload.php:ro
@@ -120,7 +121,7 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Assure SQLite >= 3.46 côté runner (pour drush si)
+      # SQLite >= 3.46 côté runner pour l'install Drush
       - name: Build & preload SQLite 3.46 for runner
         run: |
           set -euo pipefail
@@ -186,29 +187,24 @@ jobs:
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
-      # ⚙️ Forcer DirectoryIndex index.php dans le service web (élimine 403 Apache sur "/")
-      - name: Force DirectoryIndex in web service (Apache)
+      # Debug rapide si encore un souci d'accès
+      - name: Debug presence of index.php and permissions
         run: |
           set -e
-          WEB_CID="$(docker ps -aqf "name=web")"
-          if [ -z "$WEB_CID" ]; then echo "Web service container not found"; exit 1; fi
-          docker exec "$WEB_CID" bash -lc '
-            set -e
-            echo "DirectoryIndex index.php index.html" > /etc/apache2/conf-enabled/zz-dirindex.conf
-            a2enmod dir >/dev/null 2>&1 || true
-            a2enmod rewrite >/dev/null 2>&1 || true
-            apache2ctl -k graceful
-          '
+          echo "== ls web =="
+          ls -la web | head -n 80
+          echo "== head -n 20 web/index.php =="
+          head -n 20 web/index.php || true
 
-      # ✅ Attente 2xx sur /
-      - name: Wait for web service (expects 2xx)
+      # ✅ Attente 2xx sur /user/login
+      - name: Wait for web service (expects 2xx on /user/login)
         run: |
           set -euo pipefail
           ATTEMPTS=60
           for i in $(seq 1 $ATTEMPTS); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/user/login)
             if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
-              echo "Web responded with HTTP $CODE"; exit 0
+              echo "Web responded with HTTP $CODE on /user/login"; exit 0
             fi
             echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
             sleep 2
