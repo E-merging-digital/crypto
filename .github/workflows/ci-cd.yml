@@ -76,6 +76,7 @@ jobs:
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
           -v ${{ github.workspace }}/web:/var/www/html:rw
+          -v ${{ github.workspace }}/vendor:/var/www/vendor:ro
         ports:
           - 8081:80
       selenium:
@@ -133,6 +134,7 @@ jobs:
             echo "\$settings['trusted_host_patterns'][] = '^web$';"
             echo "\$settings['trusted_host_patterns'][] = '^localhost$';"
             echo "\$settings['trusted_host_patterns'][] = '^127\\\\.0\\\\.0\\\\.1$';"
+            echo "\$settings['trusted_host_patterns'][] = '^localhost(:[0-9]+)?$';"
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
@@ -142,9 +144,15 @@ jobs:
         working-directory: web
         run: |
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
+
+      # ⚙️ Front page publique pour éviter le 403 du profil "minimal"
+      - name: Make front page public (use /user/login)
+        working-directory: web
+        run: |
+          ../vendor/bin/drush cset system.site page.front /user/login -y
           ../vendor/bin/drush cr
 
-      # ✅ Vise le port mappé local du service 'web'
+      # ✅ Vérifie que le service Apache répond en 200 sur /
       - name: Wait for web service (expects 2xx)
         run: |
           set -euo pipefail
@@ -164,7 +172,6 @@ jobs:
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
-      # ✅ Behat vise désormais http://localhost:8081
       - name: Run Behat (profil CI)
         env:
           BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://localhost:8081"}}}'
