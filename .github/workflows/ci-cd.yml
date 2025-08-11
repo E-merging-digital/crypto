@@ -28,12 +28,15 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
+          # Extensions utiles pour ton projet + SQLite côté runner
+          extensions: xml, gd, mysqli, zip, gmp, sqlite, pdo_sqlite
           coverage: none
-          extensions: xml, gd, mysqli, zip, gmp
           tools: composer
 
       - name: Show loaded PHP modules (debug)
-        run: php -m | head -n 200
+        run: |
+          php -v
+          php -m | sort | head -n 200
 
       - name: Cache Composer dependencies
         uses: actions/cache@v4
@@ -71,45 +74,25 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
 
-    container:
-      image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    services:
-      web:
-        image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
-        # ⚠️ Pas de healthcheck ici (laisse démarrer Apache, on vérifiera après Drush).
-        options: >-
-          --name web
-          -v ${{ github.workspace }}/web:/var/www/html:rw
-          -v ${{ github.workspace }}/vendor:/var/www/vendor:ro
-          -v ${{ github.workspace }}/autoload.php:/var/www/autoload.php:ro
-      selenium:
-        # Recommandations officielles : tag pinné + /dev/shm à 2G
-        image: selenium/standalone-chrome:4.34.0-20250727
-        options: >-
-          --shm-size="2g"
-          --health-cmd="curl -fsS http://localhost:4444/status | grep -q '\"ready\":true'"
-          --health-interval=5s --health-timeout=5s --health-retries=30
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
 
-      - name: Sanity check shell & PATH
-        run: |
-          command -v bash
-          echo "PATH=$PATH"
+      - name: Setup PHP (8.3 + SQLite)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: gd, zip, gmp, sqlite, pdo_sqlite, mbstring, curl
+          coverage: none
+          tools: composer
 
-      - name: Cache Composer (in container)
+      - name: Cache Composer (host)
         uses: actions/cache@v4
         with:
           path: |
-            /github/home/.composer/cache
+            ~/.composer/cache
             vendor
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
@@ -121,19 +104,13 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # S'assurer que le scaffold Drupal existe (index.php, .htaccess)
-      - name: Ensure Drupal scaffold files exist
+      - name: Assert PHP has SQLite (hard fail if missing)
         run: |
-          set -e
-          if [ ! -f web/index.php ]; then
-            cp vendor/drupal/core/assets/scaffold/files/index.php web/index.php
-          fi
-          if [ ! -f web/.htaccess ] && [ -f vendor/drupal/core/assets/scaffold/files/htaccess ]; then
-            cp vendor/drupal/core/assets/scaffold/files/htaccess web/.htaccess
-          fi
+          php -m | grep -qi pdo_sqlite || { echo "pdo_sqlite missing"; exit 1; }
+          php -m | grep -qi sqlite3 || { echo "sqlite3 missing"; exit 1; }
+          php -r 'echo "PDO drivers: ", implode(",", PDO::getAvailableDrivers()), PHP_EOL;'
 
-      # settings.php pour SQLite + hash_salt + trusted hosts
-      - name: Prepare Drupal settings.php for CI
+      - name: Prepare Drupal settings.php for CI (SQLite)
         run: |
           set -e
           cp web/sites/default/default.settings.php web/sites/default/settings.php
@@ -145,59 +122,73 @@ jobs:
             echo "  'prefix' => '',"
             echo "];"
             echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
-            echo "\$settings['trusted_host_patterns'][] = '^web$';"
+            # On reste en accès local, pas besoin de trusted host complexe
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
+          ls -l web/index.php
 
-      # Installer Drupal (profil minimal) et vider les caches
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
-          set -e
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
-      # Attendre SELENIUM (GH Actions attendra déjà via healthcheck, on revalide par sécurité)
-      - name: Wait for Selenium
+      - name: Start PHP built-in server (Drupal router)
         run: |
-          set -euo pipefail
-          ATTEMPTS=120
-          for i in $(seq 1 $ATTEMPTS); do
-            if curl -fsS http://selenium:4444/status | grep -q '"ready":true'; then
-              echo "Selenium ready"; exit 0
+          # Le serveur interne sait router via index.php
+          nohup php -S 127.0.0.1:8081 -t web web/index.php >/dev/null 2>&1 &
+          # Attendre que ça réponde (2xx..4xx = OK, le site existe)
+          for i in {1..60}; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/ || true)
+            if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
+              echo "Local server HTTP $CODE"; break
             fi
-            echo "Waiting Selenium... ($i/$ATTEMPTS)"
-            sleep 2
+            echo "Waiting local PHP server (HTTP ${CODE:-none})... ($i/60)"; sleep 2
           done
-          echo "Selenium did not become ready in time."
-          exit 1
 
-      # Vérifier que le site répond (HTTP 2xx/3xx/4xx acceptable <500)
-      - name: Wait for web reachability (allow 2xx..4xx)
+      - name: Launch Selenium (detached)
         run: |
-          set -euo pipefail
-          ATTEMPTS=60
-          for i in $(seq 1 $ATTEMPTS); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://web/user/login)
-            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
-              echo "Web responded with HTTP $CODE"; exit 0
+          docker pull selenium/standalone-chrome:4.30.0
+          docker run -d --name selenium -p 4444:4444 --shm-size=2g selenium/standalone-chrome:4.30.0
+          # Attente robustes: /status puis /wd/hub/status selon la version
+          for i in {1..120}; do
+            if curl -fsS http://127.0.0.1:4444/status | grep -q '"ready":\s*true'; then
+              echo "Selenium ready via /status"; break
             fi
-            echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
-            sleep 2
+            if curl -fsS http://127.0.0.1:4444/wd/hub/status | grep -q '"ready":\s*true'; then
+              echo "Selenium ready via /wd/hub/status"; break
+            fi
+            echo "Waiting Selenium... ($i/120)"; sleep 2
           done
-          echo "Web did not reach <500 in time."
-          exit 1
 
       - name: Verify FeatureContext autoload
-        run: |
-          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
+        run: php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
       - name: Run Behat (profil CI)
         env:
-          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://web"}}}'
+          # On force Mink à utiliser notre serveur et notre Selenium local
+          BEHAT_PARAMS: >
+            { "extensions":
+              { "Behat\\MinkExtension":
+                { "base_url": "http://127.0.0.1:8081",
+                  "selenium2": { "wd_host": "http://127.0.0.1:4444/wd/hub" }
+                }
+              }
+            }
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
+
+      - name: Dump Selenium logs on failure
+        if: failure()
+        run: |
+          echo "=== Selenium logs ==="
+          docker logs selenium || true
+
+      - name: Cleanup Selenium
+        if: always()
+        run: |
+          docker rm -f selenium >/dev/null 2>&1 || true
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
@@ -219,8 +210,7 @@ jobs:
           tools: composer
 
       - name: Composer install for deploy (no dev)
-        run: |
-          composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
 
       - name: Build theme assets (si thème custom existe)
         working-directory: web/themes/custom
