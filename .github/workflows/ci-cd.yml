@@ -28,7 +28,6 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          # Extensions utiles pour ton projet + SQLite côté runner
           extensions: xml, gd, mysqli, zip, gmp, sqlite, pdo_sqlite
           coverage: none
           tools: composer
@@ -122,7 +121,6 @@ jobs:
             echo "  'prefix' => '',"
             echo "];"
             echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
-            # On reste en accès local, pas besoin de trusted host complexe
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
@@ -132,14 +130,13 @@ jobs:
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
+          set -e
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
       - name: Start PHP built-in server (Drupal router)
         run: |
-          # Le serveur interne sait router via index.php
           nohup php -S 127.0.0.1:8081 -t web web/index.php >/dev/null 2>&1 &
-          # Attendre que ça réponde (2xx..4xx = OK, le site existe)
           for i in {1..60}; do
             CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/ || true)
             if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
@@ -152,7 +149,6 @@ jobs:
         run: |
           docker pull selenium/standalone-chrome:4.30.0
           docker run -d --name selenium -p 4444:4444 --shm-size=2g selenium/standalone-chrome:4.30.0
-          # Attente robustes: /status puis /wd/hub/status selon la version
           for i in {1..120}; do
             if curl -fsS http://127.0.0.1:4444/status | grep -q '"ready":\s*true'; then
               echo "Selenium ready via /status"; break
@@ -168,15 +164,7 @@ jobs:
 
       - name: Run Behat (profil CI)
         env:
-          # On force Mink à utiliser notre serveur et notre Selenium local
-          BEHAT_PARAMS: >
-            { "extensions":
-              { "Behat\\MinkExtension":
-                { "base_url": "http://127.0.0.1:8081",
-                  "selenium2": { "wd_host": "http://127.0.0.1:4444/wd/hub" }
-                }
-              }
-            }
+          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://127.0.0.1:8081","selenium2":{"wd_host":"http://127.0.0.1:4444/wd/hub"}}}}'
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
       - name: Dump Selenium logs on failure
@@ -187,8 +175,7 @@ jobs:
 
       - name: Cleanup Selenium
         if: always()
-        run: |
-          docker rm -f selenium >/dev/null 2>&1 || true
+        run: docker rm -f selenium >/dev/null 2>&1 || true
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
