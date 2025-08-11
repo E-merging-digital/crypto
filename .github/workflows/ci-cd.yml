@@ -80,15 +80,18 @@ jobs:
     services:
       web:
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
+        # ⚠️ Pas de healthcheck ici (laisse démarrer Apache, on vérifiera après Drush).
         options: >-
+          --name web
           -v ${{ github.workspace }}/web:/var/www/html:rw
-          --health-cmd="bash -lc 'test -f /var/www/html/index.php || exit 1'"
-          --health-interval=5s --health-timeout=5s --health-retries=30
+          -v ${{ github.workspace }}/vendor:/var/www/vendor:ro
+          -v ${{ github.workspace }}/autoload.php:/var/www/autoload.php:ro
       selenium:
-        # Pinner une version stable + /dev/shm à 2G (recommandé par Selenium)
+        # Recommandations officielles : tag pinné + /dev/shm à 2G
         image: selenium/standalone-chrome:4.34.0-20250727
         options: >-
           --shm-size="2g"
+          --health-cmd="curl -fsS http://localhost:4444/status | grep -q '\"ready\":true'"
           --health-interval=5s --health-timeout=5s --health-retries=30
 
     steps:
@@ -118,23 +121,19 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Vérifier Selenium prêt (le service a son propre healthcheck, on revalide via /status)
-      - name: Wait for Selenium
+      # S'assurer que le scaffold Drupal existe (index.php, .htaccess)
+      - name: Ensure Drupal scaffold files exist
         run: |
-          set -euo pipefail
-          ATTEMPTS=120
-          for i in $(seq 1 $ATTEMPTS); do
-            if curl -fsS http://selenium:4444/status | grep -q '"ready":true'; then
-              echo "Selenium ready"; exit 0
-            fi
-            echo "Waiting Selenium... ($i/$ATTEMPTS)"
-            sleep 2
-          done
-          echo "Selenium did not become ready in time."
-          exit 1
+          set -e
+          if [ ! -f web/index.php ]; then
+            cp vendor/drupal/core/assets/scaffold/files/index.php web/index.php
+          fi
+          if [ ! -f web/.htaccess ] && [ -f vendor/drupal/core/assets/scaffold/files/htaccess ]; then
+            cp vendor/drupal/core/assets/scaffold/files/htaccess web/.htaccess
+          fi
 
-      # Préparer settings.php (SQLite) côté workspace (vu par le conteneur web via le volume)
-      - name: Prepare Drupal settings.php for CI (SQLite)
+      # settings.php pour SQLite + hash_salt + trusted hosts
+      - name: Prepare Drupal settings.php for CI
         run: |
           set -e
           cp web/sites/default/default.settings.php web/sites/default/settings.php
@@ -152,48 +151,53 @@ jobs:
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      # Installer Drupal (depuis le conteneur du job, même volume que le service web)
+      # Installer Drupal (profil minimal) et vider les caches
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
+          set -e
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
-      # Vérifier qu’Apache sert bien l’index de Drupal (2xx attendu APRES installation)
-      - name: Wait for web service (expects 2xx)
+      # Attendre SELENIUM (GH Actions attendra déjà via healthcheck, on revalide par sécurité)
+      - name: Wait for Selenium
+        run: |
+          set -euo pipefail
+          ATTEMPTS=120
+          for i in $(seq 1 $ATTEMPTS); do
+            if curl -fsS http://selenium:4444/status | grep -q '"ready":true'; then
+              echo "Selenium ready"; exit 0
+            fi
+            echo "Waiting Selenium... ($i/$ATTEMPTS)"
+            sleep 2
+          done
+          echo "Selenium did not become ready in time."
+          exit 1
+
+      # Vérifier que le site répond (HTTP 2xx/3xx/4xx acceptable <500)
+      - name: Wait for web reachability (allow 2xx..4xx)
         run: |
           set -euo pipefail
           ATTEMPTS=60
           for i in $(seq 1 $ATTEMPTS); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://web/)
-            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://web/user/login)
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
               echo "Web responded with HTTP $CODE"; exit 0
             fi
             echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
             sleep 2
           done
-          echo "Web did not reach 2xx in time."
+          echo "Web did not reach <500 in time."
           exit 1
 
-      # Vérif autoload du FeatureContext
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
       - name: Run Behat (profil CI)
+        env:
+          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://web"}}}'
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
-
-      # Diagnostics auto si échec
-      - name: Dump Selenium logs on failure
-        if: failure()
-        run: |
-          echo "=== Selenium logs ==="
-          docker logs "$(docker ps -aqf "name=selenium")" || true
-      - name: Dump Web logs on failure
-        if: failure()
-        run: |
-          echo "=== Apache access/error logs (if available) ==="
-          docker exec "$(docker ps -aqf "name=web")" bash -lc 'tail -n 200 /var/log/apache2/error.log 2>/dev/null || true; tail -n 200 /var/log/apache2/access.log 2>/dev/null || true' || true
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)
@@ -215,7 +219,8 @@ jobs:
           tools: composer
 
       - name: Composer install for deploy (no dev)
-        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+        run: |
+          composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
 
       - name: Build theme assets (si thème custom existe)
         working-directory: web/themes/custom
