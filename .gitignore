@@ -25,3 +25,4 @@
 # Ignorer les fichiers PhpStorm
 /.idea/
 /*.iml
+.DS_Store

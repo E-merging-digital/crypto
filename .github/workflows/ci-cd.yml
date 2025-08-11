@@ -71,9 +71,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
 
-    # Structure conservée : services définis, mais on sert Drupal via PHP -S côté runner.
     services:
       web:
+        # ✅ Ton image Apache + PHP + SQLite 3.46 compilée
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
           -v ${{ github.workspace }}/web:/var/www/html:rw
@@ -84,7 +84,6 @@ jobs:
         ports:
           - 4444:4444
         options: >-
-          --add-host=host.docker.internal:host-gateway
           --shm-size="2g"
           --health-cmd="curl -s http://localhost:4444/status | grep -q 'ready'"
           --health-interval=5s --health-timeout=5s --health-retries=30
@@ -97,6 +96,7 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
 
+      # PHP CLI côté runner avec pdo_sqlite & sqlite3 pour Drush
       - name: Setup PHP 8.3 for job (CLI)
         uses: shivammathur/setup-php@v2
         with:
@@ -120,37 +120,7 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # Compile & installe SQLite >= 3.46 (pour compat Drupal 11)
-      - name: Build & install SQLite 3.46
-        run: |
-          set -euo pipefail
-          sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential wget ca-certificates
-          SQLITE_VER=3460000   # 3.46.0
-          wget -O /tmp/sqlite.tar.gz "https://www.sqlite.org/2024/sqlite-autoconf-${SQLITE_VER}.tar.gz"
-          mkdir -p /tmp/sqlite-src && tar -xzf /tmp/sqlite.tar.gz -C /tmp/sqlite-src --strip-components=1
-          cd /tmp/sqlite-src
-          ./configure --prefix=/usr/local CFLAGS="-O2 -fPIC -DSQLITE_ENABLE_COLUMN_METADATA=1 -DSQLITE_ENABLE_JSON1=1"
-          make -j"$(nproc)"
-          sudo make install
-          echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/zz-local-sqlite3.conf
-          sudo ldconfig
-          sqlite3 --version
-
-      # Précharger la libsqlite3 compilée pour garantir le chargement de pdo_sqlite
-      - name: Force runtime to use compiled libsqlite3
-        run: echo "LD_PRELOAD=/usr/local/lib/libsqlite3.so.0" >> "$GITHUB_ENV"
-
-      # Vérification BLOQUANTE des drivers PHP (avec LD_PRELOAD actif)
-      - name: Assert PHP SQLite drivers are loaded
-        run: |
-          set -e
-          php -i | grep -E '^extension_dir|Loaded Configuration File|Scan this dir' || true
-          php -m | grep -iE 'pdo_sqlite|sqlite3' || { echo "ERROR: PHP modules pdo_sqlite/sqlite3 are not loaded."; exit 1; }
-          php -r 'echo "PDO drivers: ", implode(",", PDO::getAvailableDrivers()), PHP_EOL;' | grep -q 'sqlite' || { echo "ERROR: PDO sqlite driver not available."; exit 1; }
-          php -r 'echo "PHP SQLite lib: ", (class_exists("SQLite3")? (SQLite3::version()["lib"]??"n/a") : "no-sqlite3"), PHP_EOL;'
-
-      # settings.php pour SQLite + trusted hosts (local & docker)
+      # settings.php pour SQLite + trusted hosts (service 'web')
       - name: Prepare Drupal settings.php for CI (SQLite)
         run: |
           set -e
@@ -163,67 +133,45 @@ jobs:
             echo "  'prefix' => '',"
             echo "];"
             echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
+            echo "\$settings['trusted_host_patterns'][] = '^web$';"
             echo "\$settings['trusted_host_patterns'][] = '^localhost$';"
             echo "\$settings['trusted_host_patterns'][] = '^127\\\\.0\\\\.0\\\\.1$';"
-            echo "\$settings['trusted_host_patterns'][] = '^host\\\\.docker\\\\.internal$';"
           } >> web/sites/default/settings.php
           mkdir -p web/sites/default/files
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      # Installation Drupal (SQLite) avec pilotes garantis
+      # Installer Drupal (SQLite) via Drush (PHP CLI du runner)
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
-      # Servir Drupal depuis le même workspace (aucun décalage de volumes)
-      - name: Start PHP built-in server (port 8085)
-        run: |
-          nohup php -S 0.0.0.0:8085 -t web web/index.php >/dev/null 2>&1 &
-          echo $! > /tmp/phpserver.pid
-
-      - name: Wait for local PHP server (expects 2xx)
+      # ✅ Attendre le service web (Apache) → ne plus cibler localhost:8085
+      - name: Wait for web service (expects 2xx)
         run: |
           set -euo pipefail
           ATTEMPTS=60
           for i in $(seq 1 $ATTEMPTS); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8085/)
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://web/)
             if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
-              echo "Local PHP server responded with HTTP $CODE"; exit 0
+              echo "Web responded with HTTP $CODE"; exit 0
             fi
-            echo "Waiting local server (HTTP $CODE)... ($i/$ATTEMPTS)"
+            echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
             sleep 2
           done
-          echo "Local server did not reach 2xx in time."
-          exit 1
-
-      - name: Wait for Selenium service (robust)
-        run: |
-          set -euo pipefail
-          ATTEMPTS=120
-          for i in $(seq 1 $ATTEMPTS); do
-            if curl -fsS http://localhost:4444/status | jq -e '.ready == true' >/dev/null 2>&1; then
-              echo "Selenium ready via /status"; exit 0
-            fi
-            if curl -fsS http://localhost:4444/wd/hub/status | jq -e '.value.ready == true' >/dev/null 2>&1; then
-              echo "Selenium ready via /wd/hub/status"; exit 0
-            fi
-            echo "Waiting Selenium... ($i/$ATTEMPTS)"
-            sleep 2
-          done
-          echo "Selenium did not become ready in time."
+          echo "Web did not reach 2xx in time."
           exit 1
 
       - name: Verify FeatureContext autoload
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
-      # Behat vise le serveur PHP local via host.docker.internal (depuis le conteneur Selenium)
+      # Behat vise le service 'web' (docroot = dépôt/web monté en /var/www/html)
       - name: Run Behat (profil CI)
         env:
-          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://host.docker.internal:8085"}}}'
+          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://web"}}}'
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
   deploy:
