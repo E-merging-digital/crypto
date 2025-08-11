@@ -130,4 +130,139 @@ jobs:
           wget -O /tmp/sqlite.tar.gz "https://www.sqlite.org/2024/sqlite-autoconf-${SQLITE_VER}.tar.gz"
           mkdir -p /tmp/sqlite-src && tar -xzf /tmp/sqlite.tar.gz -C /tmp/sqlite-src --strip-components=1
           cd /tmp/sqlite-src
-          ./configure --prefix=/usr/local CFLAGS="-O2 -fPIC -DSQLITE_ENABLE_C
+          ./configure --prefix=/usr/local CFLAGS="-O2 -fPIC -DSQLITE_ENABLE_COLUMN_METADATA=1 -DSQLITE_ENABLE_JSON1=1"
+          make -j"$(nproc)"
+          sudo make install
+          echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/zz-local-sqlite3.conf
+          sudo ldconfig
+          echo "LD_PRELOAD=/usr/local/lib/libsqlite3.so.0" >> "$GITHUB_ENV"
+          sqlite3 --version
+
+      # Garantit index.php et .htaccess (sans script composer)
+      - name: Ensure Drupal scaffold files exist
+        run: |
+          set -e
+          if [ ! -f web/index.php ]; then
+            if [ -f vendor/drupal/core/assets/scaffold/files/index.php ]; then
+              cp vendor/drupal/core/assets/scaffold/files/index.php web/index.php
+            else
+              echo "ERROR: vendor/drupal/core/assets/scaffold/files/index.php introuvable"; exit 1
+            fi
+          fi
+          if [ ! -f web/.htaccess ] && [ -f vendor/drupal/core/assets/scaffold/files/htaccess ]; then
+            cp vendor/drupal/core/assets/scaffold/files/htaccess web/.htaccess
+          fi
+          ls -l web/index.php
+          ls -l web/.htaccess || true
+
+      # settings.php : DB + hosts + front page publique (/user/login)
+      - name: Prepare Drupal settings.php for CI (SQLite + front override)
+        run: |
+          set -e
+          cp web/sites/default/default.settings.php web/sites/default/settings.php
+          {
+            echo ""
+            echo "\$databases['default']['default'] = ["
+            echo "  'driver' => 'sqlite',"
+            echo "  'database' => __DIR__ . '/files/.ht.sqlite',"
+            echo "  'prefix' => '',"
+            echo "];"
+            echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
+            echo "\$settings['trusted_host_patterns'][] = '^web$';"
+            echo "\$settings['trusted_host_patterns'][] = '^localhost$';"
+            echo "\$settings['trusted_host_patterns'][] = '^localhost(:[0-9]+)?$';"
+            echo "\$settings['trusted_host_patterns'][] = '^127\\\\.0\\\\.0\\\\.1$';"
+            echo "\$config['system.site']['page']['front'] = '/user/login';"
+          } >> web/sites/default/settings.php
+          mkdir -p web/sites/default/files
+          chmod -R 777 web/sites/default/files
+          php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
+
+      # Installer Drupal (SQLite) via Drush
+      - name: Install Drupal (SQLite) via Drush
+        working-directory: web
+        run: |
+          set -e
+          ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
+          ../vendor/bin/drush cr
+
+      # ⚙️ Forcer DirectoryIndex index.php dans le service web (élimine 403 Apache sur "/")
+      - name: Force DirectoryIndex in web service (Apache)
+        run: |
+          set -e
+          WEB_CID="$(docker ps -aqf "name=web")"
+          if [ -z "$WEB_CID" ]; then echo "Web service container not found"; exit 1; fi
+          docker exec "$WEB_CID" bash -lc '
+            set -e
+            echo "DirectoryIndex index.php index.html" > /etc/apache2/conf-enabled/zz-dirindex.conf
+            a2enmod dir >/dev/null 2>&1 || true
+            a2enmod rewrite >/dev/null 2>&1 || true
+            apache2ctl -k graceful
+          '
+
+      # ✅ Attente 2xx sur /
+      - name: Wait for web service (expects 2xx)
+        run: |
+          set -euo pipefail
+          ATTEMPTS=60
+          for i in $(seq 1 $ATTEMPTS); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+              echo "Web responded with HTTP $CODE"; exit 0
+            fi
+            echo "Waiting Web (HTTP $CODE)... ($i/$ATTEMPTS)"
+            sleep 2
+          done
+          echo "Web did not reach 2xx in time."
+          exit 1
+
+      - name: Verify FeatureContext autoload
+        run: |
+          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
+
+      # Behat sur le service web (port 8081)
+      - name: Run Behat (profil CI)
+        env:
+          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://localhost:8081"}}}'
+        run: vendor/bin/behat -c behat.yml -p ci --colors --strict
+
+  deploy:
+    name: Déploiement (à adapter selon l’environnement)
+    runs-on: ubuntu-latest
+    needs: [phpunit-and-lint, behat]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH for private deploy
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: PHP & Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
+      - name: Composer install for deploy (no dev)
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Build theme assets (si thème custom existe)
+        working-directory: web/themes/custom
+        run: |
+          if [ -f package.json ]; then npm ci && npm run build; else echo "No theme build"; fi
+
+      - name: Push sur le repo de production
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub CI"
+          git remote add production ${{ secrets.PRODUCTION_SSH_REPO }}
+          git push production main:main --force-with-lease
+
+      - name: Run Drush post-deploy
+        env:
+          PROD_SSH: ${{ secrets.PROD_SSH }}
+        run: |
+          ssh -o StrictHostKeyChecking=no "$PROD_SSH" \
+            "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
