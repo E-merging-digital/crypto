@@ -73,6 +73,7 @@ jobs:
 
     services:
       web:
+        # ✅ Ton image Apache + PHP + SQLite 3.46 compilée
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
           -v ${{ github.workspace }}/web:/var/www/html:rw
@@ -95,7 +96,7 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
 
-      # PHP CLI avec pdo_sqlite & sqlite3 pour Drush (côté runner)
+      # PHP CLI côté runner avec pdo_sqlite & sqlite3 pour Drush
       - name: Setup PHP 8.3 for job (CLI)
         uses: shivammathur/setup-php@v2
         with:
@@ -147,7 +148,7 @@ jobs:
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
-      # Attendre que le service web réponde en 2xx (Apache de l'image)
+      # ✅ Attendre le service web (Apache) → ne plus cibler localhost:8085
       - name: Wait for web service (expects 2xx)
         run: |
           set -euo pipefail
