@@ -73,7 +73,6 @@ jobs:
 
     services:
       web:
-        # ✅ Ton image Apache + PHP + SQLite 3.46 compilée
         image: ghcr.io/e-merging-digital/crypto:php8.3-gd-gmp-git
         options: >-
           -v ${{ github.workspace }}/web:/var/www/html:rw
@@ -96,7 +95,6 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
 
-      # PHP CLI côté runner avec pdo_sqlite & sqlite3 pour Drush
       - name: Setup PHP 8.3 for job (CLI)
         uses: shivammathur/setup-php@v2
         with:
@@ -120,7 +118,6 @@ jobs:
       - name: Add vendor/bin to PATH
         run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
 
-      # settings.php pour SQLite + trusted hosts (service 'web')
       - name: Prepare Drupal settings.php for CI (SQLite)
         run: |
           set -e
@@ -141,20 +138,19 @@ jobs:
           chmod -R 777 web/sites/default/files
           php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
 
-      # Installer Drupal (SQLite) via Drush (PHP CLI du runner)
       - name: Install Drupal (SQLite) via Drush
         working-directory: web
         run: |
           ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
           ../vendor/bin/drush cr
 
-      # ✅ Attendre le service web (Apache) → ne plus cibler localhost:8085
+      # ✅ Vise le port mappé local du service 'web'
       - name: Wait for web service (expects 2xx)
         run: |
           set -euo pipefail
           ATTEMPTS=60
           for i in $(seq 1 $ATTEMPTS); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://web/)
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
             if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
               echo "Web responded with HTTP $CODE"; exit 0
             fi
@@ -168,10 +164,10 @@ jobs:
         run: |
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
-      # Behat vise le service 'web' (docroot = dépôt/web monté en /var/www/html)
+      # ✅ Behat vise désormais http://localhost:8081
       - name: Run Behat (profil CI)
         env:
-          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://web"}}}'
+          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://localhost:8081"}}}'
         run: vendor/bin/behat -c behat.yml -p ci --colors --strict
 
   deploy:
