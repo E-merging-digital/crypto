@@ -149,10 +149,12 @@ jobs:
 
       # Lancement de Behat *dans* le conteneur web DDEV (profil ddev)
       - name: Verify FeatureContext autoload
-        run: ddev exec php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
+        run: |
+          ddev exec php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
       - name: Run Behat (profile ddev)
-        run: ddev exec bash -lc 'set -e; timeout 15m vendor/bin/behat -c behat.yml -p ddev --colors --strict -vvv'
+        run: |
+          ddev exec bash -lc 'set -e; timeout 15m vendor/bin/behat -c behat.yml -p ddev --colors --strict -vvv'
 
       # Logs utiles en cas d’échec
       - name: Dump Selenium logs on failure
