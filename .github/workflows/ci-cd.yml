@@ -89,7 +89,7 @@ jobs:
           - 4444:4444
         options: >-
           --shm-size="2g"
-          --health-cmd="bash -lc 'curl -fsS http://localhost:4444/status | grep -q \"\\\"ready\\\"\\s*:\\s*true\" || curl -fsS http://localhost:4444/wd/hub/status | grep -q \"\\\"ready\\\"\\s*:\\s*true\"'"
+          --health-cmd="bash -lc 'curl -fsS http://localhost:4444/status | grep -q \"\\\"ready\\\"[[:space:]]*:[[:space:]]*true\" || curl -fsS http://localhost:4444/wd/hub/status | grep -q \"\\\"ready\\\"[[:space:]]*:[[:space:]]*true\"'"
           --health-interval=5s --health-timeout=5s --health-retries=30
 
     steps:
@@ -137,106 +137,122 @@ jobs:
           set -e
           cp web/sites/default/default.settings.php web/sites/default/settings.php
           cat >> web/sites/default/settings.php <<'PHP'
-          $databases['default']['default'] = [
-            'driver' => 'mysql',
-            'database' => 'ci_crypto',
-            'username' => 'root',
-            'password' => 'root',
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'prefix' => '',
-            'namespace' => 'Drupal\\mysql\\Driver\\Database\\mysql',
-            'collation' => 'utf8mb4_general_ci',
-          ];
-          $settings['hash_salt'] = 'ci-auto-generated-salt';
-          PHP
-          mkdir -p web/sites/default/files
-          chmod -R 777 web/sites/default/files
+  $databases['default']['default'] = [
+  'driver' => 'mysql',
+  'database' => 'ci_crypto',
+  'username' => 'root',
+  'password' => 'root',
+  'host' => '127.0.0.1',
+  'port' => '3306',
+  'prefix' => '',
+  'namespace' => 'Drupal\\mysql\\Driver\\Database\\mysql',
+  'collation' => 'utf8mb4_general_ci',
+];
+  $settings['hash_salt'] = 'ci-auto-generated-salt';
+  PHP
+  mkdir -p web/sites/default/files
+  chmod -R 777 web/sites/default/files
 
-      - name: Install Drupal (MySQL) via Drush
-        working-directory: web
-        run: |
-          set -e
-          ../vendor/bin/drush si minimal -y --db-url=mysql://root:root@127.0.0.1:3306/ci_crypto --site-name="CI Crypto" --account-name=admin --account-pass=admin
-          ../vendor/bin/drush cr
+- name: Install Drupal (MySQL) via Drush
+  working-directory: web
+  run: |
+    set -e
+    ../vendor/bin/drush si minimal -y --db-url=mysql://root:root@127.0.0.1:3306/ci_crypto --site-name="CI Crypto" --account-name=admin --account-pass=admin
+    ../vendor/bin/drush cr
+    # Front page publique pour le smoke-test
+    ../vendor/bin/drush cset system.site page.front /user/login -y
+    ../vendor/bin/drush cr
+    ../vendor/bin/drush status
 
-      - name: Start PHP built-in server (router)
-        run: |
-          nohup php -S 127.0.0.1:8081 -t web web/index.php >/dev/null 2>&1 &
-          for i in {1..60}; do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/core/assets/vendor/jquery/jquery.min.js || true)
-            if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
-              echo "Local server HTTP $CODE"; break
-            fi
-            echo "Waiting local PHP server (HTTP ${CODE:-none})... ($i/60)"; sleep 2
-          done
+- name: Start PHP built-in server (Drupal router)
+  run: |
+    nohup php -d display_errors=1 -S 127.0.0.1:8081 -t web web/core/scripts/router.php >/dev/null 2>&1 &
+    # On attend 200 sur /user/login puis sur /
+    for i in {1..60}; do
+      CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/user/login || true)
+      if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+        echo "/user/login HTTP $CODE"; break
+      fi
+      echo "Waiting /user/login (HTTP ${CODE:-none})... ($i/60)"; sleep 2
+    done
+    for i in {1..60}; do
+      CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/ || true)
+      if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+        echo "/ HTTP $CODE"; break
+      fi
+      echo "Waiting / (HTTP ${CODE:-none})... ($i/60)"; sleep 2
+    done
 
-      - name: Verify Selenium health
-        run: |
-          for i in {1..120}; do
-            if curl -fsS http://127.0.0.1:4444/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true"; then
-              echo "Selenium ready via /status"; exit 0
-            fi
-            if curl -fsS http://127.0.0.1:4444/wd/hub/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true"; then
-              echo "Selenium ready via /wd/hub/status"; exit 0
-            fi
-            echo "Waiting Selenium... ($i/120)"; sleep 2
-          done
-          echo "Selenium did not become ready in time."; exit 1
+- name: Verify Selenium health
+  run: |
+    for i in {1..120}; do
+      if curl -fsS http://127.0.0.1:4444/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true"; then
+        echo "Selenium ready via /status"; exit 0
+      fi
+      if curl -fsS http://127.0.0.1:4444/wd/hub/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true"; then
+        echo "Selenium ready via /wd/hub/status"; exit 0
+      fi
+      echo "Waiting Selenium... ($i/120)"; sleep 2
+    done
+    echo "Selenium did not become ready in time."; exit 1
 
-      - name: Verify FeatureContext autoload
-        run: |
-          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
+- name: Verify FeatureContext autoload
+  run: |
+    php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
-      - name: Run Behat (profile ci, force base_url + wd_host)
-        env:
-          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://127.0.0.1:8081","selenium2":{"wd_host":"http://127.0.0.1:4444/wd/hub"}}}}'
-        run: |
-          timeout 15m vendor/bin/behat -c behat.yml -p ci --colors --strict -vvv
+- name: Run Behat (profile ci)
+  run: |
+    timeout 15m vendor/bin/behat -c behat.yml -p ci --colors --strict -vvv
 
-      - name: Dump Selenium logs on failure
-        if: failure()
-        run: |
-          echo "=== Selenium logs ==="
-          docker logs ${{ job.services.selenium.id }} || true
+- name: Dump diagnostics on failure
+  if: failure()
+  run: |
+    echo "=== Recent Drupal watchdog (errors) ==="
+    vendor/bin/drush ws --severity=Error --count=50 || true
+    echo "=== PHP server probe / ==="
+    curl -si http://127.0.0.1:8081/ || true
+    echo "=== PHP server probe /user/login ==="
+    curl -si http://127.0.0.1:8081/user/login || true
+    echo "=== Selenium logs ==="
+    docker logs ${{ job.services.selenium.id }} || true
 
-  deploy:
-    name: Déploiement (à adapter selon l’environnement)
-    runs-on: ubuntu-latest
-    needs: [phpunit-and-lint, behat]
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
+deploy:
+  name: Déploiement (à adapter selon l’environnement)
+  runs-on: ubuntu-latest
+  needs: [phpunit-and-lint, behat]
+  if: github.ref == 'refs/heads/main'
+  steps:
+    - uses: actions/checkout@v4
 
-      - name: Set up SSH for private deploy
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+    - name: Set up SSH for private deploy
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: PHP & Composer
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          tools: composer
+    - name: PHP & Composer
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.3'
+        tools: composer
 
-      - name: Composer install for deploy (no dev)
-        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+    - name: Composer install for deploy (no dev)
+      run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
 
-      - name: Build theme assets (si thème custom existe)
-        working-directory: web/themes/custom
-        run: |
-          if [ -f package.json ]; then npm ci && npm run build; else echo "No theme build"; fi
+    - name: Build theme assets (si thème custom existe)
+      working-directory: web/themes/custom
+      run: |
+        if [ -f package.json ]; then npm ci && npm run build; else echo "No theme build"; fi
 
-      - name: Push sur le repo de production
-        run: |
-          git config --global user.email "github-actions@github.com"
-          git config --global user.name "GitHub CI"
-          git remote add production ${{ secrets.PRODUCTION_SSH_REPO }}
-          git push production main:main --force-with-lease
+    - name: Push sur le repo de production
+      run: |
+        git config --global user.email "github-actions@github.com"
+        git config --global user.name "GitHub CI"
+        git remote add production ${{ secrets.PRODUCTION_SSH_REPO }}
+        git push production main:main --force-with-lease
 
-      - name: Run Drush post-deploy
-        env:
-          PROD_SSH: ${{ secrets.PROD_SSH }}
-        run: |
-          ssh -o StrictHostKeyChecking=no "$PROD_SSH" \
-            "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
+    - name: Run Drush post-deploy
+      env:
+        PROD_SSH: ${{ secrets.PROD_SSH }}
+      run: |
+        ssh -o StrictHostKeyChecking=no "$PROD_SSH" \
+          "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
