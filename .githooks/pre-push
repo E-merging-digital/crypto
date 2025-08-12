@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo ">>> Running GrumPHP testsuite: pre-push (PHPUnit complet)"
+if command -v ddev >/dev/null 2>&1; then
+  ddev exec -- ./vendor/bin/grumphp run --testsuite pre-push
+else
+  ./vendor/bin/grumphp run --testsuite pre-push
+fi
+
+# Behat local : uniquement si DDEV est disponible (en CI on le lance autrement).
+if command -v ddev >/dev/null 2>&1; then
+  if [ -x ./vendor/bin/behat ] && [ -f ./behat.yml ]; then
+    echo ">>> Running Behat (profile: ddev)"
+    ddev exec -- ./vendor/bin/behat -c behat.yml -p ddev --colors --strict
+  else
+    echo ">>> Behat not found (vendor/bin/behat) or behat.yml missing: skipping."
+  fi
+else
+  echo ">>> ddev not found: skipping Behat in pre-push (run it manually or via CI)."
+fi
+
+echo ">>> pre-push checks passed."

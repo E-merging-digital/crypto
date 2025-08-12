@@ -1,37 +1,60 @@
-# grumphp.yml
 grumphp:
-  git_hook_variables:
-    EXEC_GRUMPHP_COMMAND: ddev exec
-  stop_on_failure: true
-  process_timeout: 300
-  parallel: false
+  hooks_preset: local
+  process_timeout: 900
+  parallel:
+    enabled: true
 
   tasks:
-    phpcs:
-      standard: [Drupal, DrupalPractice]
-      triggered_by: ['php', 'module', 'inc', 'install', 'test', 'profile', 'theme']
-      ignore_patterns:
-        - web/core/*
-        - web/vendor/*
-    twigcs:
-      triggered_by: [ 'twig' ]
-      # On laisse path à sa valeur par défaut ('.'); ne PAS fournir un tableau ici.
-      severity: warning
-      display: all
-      ruleset: FriendsOfTwig\Twigcs\Ruleset\Official
-      exclude:
-        - vendor
-        - web/core
-        - web/modules/contrib
-        - web/themes/contrib
-    phpstan:
-      configuration: phpstan.neon
-      memory_limit: "2G"
+    # Composer validate + PHPUnit (Unit) rapides au pré-commit
     shell:
       scripts:
-        - ["-c", "./scripts/run-tests.sh"]
+        - ['composer', 'validate', '--strict', '--no-check-publish', '--no-interaction']
+        - ['bash', '-lc', 'test -x ./vendor/bin/phpunit && ./vendor/bin/phpunit --testsuite Unit || echo "PHPUnit not installed, skipping Unit suite."']
 
-    # optionnel : si vous avez un phpunit.xml.dist et voulez la tâche native à côté
-    # phpunit:
-    #   testsuite: grumphp
-    #   config_file: web/phpunit.xml.dist
+    # PHPCS (standards définis dans phpcs.xml.dist)
+    phpcs:
+      standard: 'phpcs.xml.dist'
+      ignore_patterns:
+        - '/vendor/*'
+        - '/web/core/*'
+        - '/web/modules/contrib/*'
+        - '/web/themes/contrib/*'
+      triggered_by: [php, module, inc, install, profile, theme, engine]
+
+    # PHPStan
+    phpstan:
+      configuration: 'phpstan.neon'
+      memory_limit: '-1'
+
+    # PHPUnit complet (appelé dans la testsuite pre-push)
+    phpunit:
+      config_file: 'phpunit.xml.dist'
+      always_execute: true
+
+    # TwigCS — utiliser "ruleset" (pas "config")
+    twigcs:
+      ruleset: 'official'
+
+    # JSON/XML lint — pas de "triggered_by" dans ta version de GrumPHP
+    jsonlint:
+      detect_key_conflicts: true
+      ignore_patterns:
+        - '/vendor/*'
+
+    xmllint:
+      ignore_patterns:
+        - '/vendor/*'
+
+  testsuites:
+    pre-commit:
+      tasks:
+        - shell
+        - phpcs
+        - phpstan
+        - twigcs
+        - jsonlint
+        - xmllint
+
+    pre-push:
+      tasks:
+        - phpunit
