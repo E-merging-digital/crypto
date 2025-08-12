@@ -69,9 +69,11 @@ jobs:
         run: grumphp run
 
   behat:
-    name: Behat end-to-end tests
+    name: Behat end-to-end tests (DDEV)
     runs-on: ubuntu-latest
     needs: phpunit-and-lint
+    env:
+      DDEV_NONINTERACTIVE: "true"
 
     steps:
       - uses: actions/checkout@v4
@@ -79,106 +81,92 @@ jobs:
       - name: Mark workspace safe
         run: git config --global --add safe.directory "${{ github.workspace }}"
 
-      - name: Setup PHP (8.3 + SQLite)
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: gd, zip, gmp, sqlite, pdo_sqlite, mbstring, curl
-          coverage: none
-          tools: composer
+      # Installe DDEV et Docker context pour le runner GitHub
+      - name: Setup DDEV
+        uses: ddev/github-action-setup-ddev@v1
 
-      - name: Cache Composer (host)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.composer/cache
-            vendor
-          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-composer-
+      # Démarre DDEV (utilise .ddev/config.yaml de votre projet)
+      - name: ddev start
+        run: ddev start --omit-snapshot
 
-      - name: Install dev dependencies
-        run: composer install --prefer-dist --no-interaction --optimize-autoloader
-
-      - name: Add vendor/bin to PATH
-        run: echo "${GITHUB_WORKSPACE}/vendor/bin" >> "$GITHUB_PATH"
-
-      - name: Assert PHP has SQLite (hard fail if missing)
+      # (Optionnel mais recommandé) Installer l'add-on Selenium si non commité dans le dépôt
+      - name: Ensure Selenium add-on is present
         run: |
-          php -m | grep -qi pdo_sqlite || { echo "pdo_sqlite missing"; exit 1; }
-          php -m | grep -qi sqlite3 || { echo "sqlite3 missing"; exit 1; }
-          php -r 'echo "PDO drivers: ", implode(",", PDO::getAvailableDrivers()), PHP_EOL;'
+          if [ ! -f .ddev/docker-compose.selenium-chrome.yaml ] && [ ! -f .ddev/docker-compose.selenium-chrome_extras.yaml ]; then
+            ddev add-on get ddev/ddev-selenium-standalone-chrome
+            ddev restart
+          fi
 
-      - name: Prepare Drupal settings.php for CI (SQLite)
+      # Composer dans DDEV pour être 100% iso avec le conteneur web
+      - name: Composer install (inside DDEV)
+        run: ddev composer install --prefer-dist --no-interaction --optimize-autoloader
+
+      # Prépare settings.php pour DDEV (utilise settings.ddev.php et/ou DB mysql "db:db@db/db")
+      - name: Prepare Drupal settings.php (DDEV + MariaDB)
         run: |
-          set -e
-          cp web/sites/default/default.settings.php web/sites/default/settings.php
-          {
-            echo ""
-            echo "\$databases['default']['default'] = ["
-            echo "  'driver' => 'sqlite',"
-            echo "  'database' => __DIR__ . '/files/.ht.sqlite',"
-            echo "  'prefix' => '',"
-            echo "];"
-            echo "\$settings['hash_salt'] = 'ci-auto-generated-salt';"
-          } >> web/sites/default/settings.php
-          mkdir -p web/sites/default/files
-          chmod -R 777 web/sites/default/files
-          php -r 'file_exists("web/sites/default/files/.ht.sqlite") || touch("web/sites/default/files/.ht.sqlite");'
-          ls -l web/index.php
+          ddev exec bash -lc 'set -e
+            cd web/sites/default
+            cp -f default.settings.php settings.php
+            {
+              echo "";
+              echo "// Auto-added by CI: include DDEV settings if available";
+              echo "if (getenv(\"IS_DDEV_PROJECT\") && file_exists(__DIR__ . \"/settings.ddev.php\")) {";
+              echo "  include __DIR__ . \"/settings.ddev.php\";";
+              echo "}";
+              echo "\$settings[\"hash_salt\"] = \"ci-auto-generated-salt\";";
+              echo "\$settings[\"trusted_host_patterns\"][] = \"^web$\";";
+            } >> settings.php
+            mkdir -p ../default/files && chmod -R 777 ../default/files
+          '
 
-      - name: Install Drupal (SQLite) via Drush
-        working-directory: web
+      # Vérifie que les fichiers scaffold sont bien présents
+      - name: Check Drupal scaffold (index.php)
         run: |
-          set -e
-          ../vendor/bin/drush si minimal -y --db-url=sqlite://sites/default/files/.ht.sqlite --site-name="CI Crypto" --account-name=admin --account-pass=admin
-          ../vendor/bin/drush cr
+          ddev exec bash -lc 'test -f web/index.php || (echo "web/index.php manquant. Vérifiez core-composer-scaffold." && exit 2)
+          ls -l web/index.php'
 
-      - name: Start PHP built-in server (Drupal router)
+      # Installe Drupal (MariaDB) via Drush dans DDEV
+      - name: Install Drupal via Drush (DDEV MariaDB)
         run: |
-          nohup php -S 127.0.0.1:8081 -t web web/index.php >/dev/null 2>&1 &
-          for i in {1..60}; do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/core/assets/vendor/jquery/jquery.min.js || true)
-            if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
-              echo "Local server HTTP $CODE"; break
-            fi
-            echo "Waiting local PHP server (HTTP ${CODE:-none})... ($i/60)"; sleep 2
-          done
+          ddev exec bash -lc 'set -e
+            cd web
+            ../vendor/bin/drush si minimal -y --site-name="CI Crypto" --account-name=admin --account-pass=admin
+            ../vendor/bin/drush cr
+          '
 
-      - name: Launch Selenium (detached)
+      # Attendre que Selenium (service ddev) soit prêt
+      - name: Wait for Selenium inside DDEV
         run: |
-          docker rm -f selenium >/dev/null 2>&1 || true
-          docker pull selenium/standalone-chrome:4.30.0
-          docker run -d --name selenium --shm-size=2g -p 4444:4444 selenium/standalone-chrome:4.30.0
-          for i in {1..120}; do
-            if curl -fsS http://127.0.0.1:4444/status | grep -q '"ready":\s*true'; then
-              echo "Selenium ready via /status"; break
-            fi
-            if curl -fsS http://127.0.0.1:4444/wd/hub/status | grep -q '"ready":\s*true'; then
-              echo "Selenium ready via /wd/hub/status"; break
-            fi
-            echo "Waiting Selenium... ($i/120)"; sleep 2
-          done
+          ddev exec bash -lc 'set -e
+            for i in $(seq 1 120); do
+              if curl -fsS http://selenium-chrome:4444/status | jq -e ".ready == true" >/dev/null 2>&1; then
+                echo "Selenium ready"; exit 0
+              fi
+              echo "Waiting Selenium in DDEV... ($i/120)"; sleep 2
+            done
+            echo "Selenium did not become ready in time." && exit 1
+          '
 
+      # Lancement de Behat *dans* le conteneur web DDEV (profil ddev)
       - name: Verify FeatureContext autoload
-        run: |
-          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
+        run: ddev exec php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
-      - name: Run Behat (profil CI)
-        run: |
-          # IMPORTANT : on s’appuie sur le profil "ci" de behat.yml (base_url=127.0.0.1:8081),
-          # pas de BEHAT_PARAMS contradictoire pour éviter les timeouts.
-          timeout 15m vendor/bin/behat -c behat.yml -p ci --colors --strict -vvv
+      - name: Run Behat (profile ddev)
+        run: ddev exec bash -lc 'set -e; timeout 15m vendor/bin/behat -c behat.yml -p ddev --colors --strict -vvv'
 
+      # Logs utiles en cas d’échec
       - name: Dump Selenium logs on failure
         if: failure()
-        run: |
-          echo "=== Selenium logs ==="
-          docker logs selenium || true
+        run: ddev logs -s selenium-chrome || true
 
-      - name: Cleanup Selenium
+      - name: Dump Apache/PHP logs on failure
+        if: failure()
+        run: ddev logs -s web || true
+
+      # Nettoyage DDEV (on laisse les artefacts de logs ci-dessus)
+      - name: ddev stop
         if: always()
-        run: docker rm -f selenium >/dev/null 2>&1 || true
+        run: ddev stop --omit-snapshot
 
   deploy:
     name: Déploiement (à adapter selon l’environnement)

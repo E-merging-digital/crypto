@@ -1,0 +1,9 @@
+version: '3.6'
+services:
+  web:
+    depends_on:
+      - db
+      - selenium
+    links:
+      - db:db
+      - selenium:selenium

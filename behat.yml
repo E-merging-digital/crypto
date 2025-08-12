@@ -62,19 +62,17 @@ ddev:
 ci:
   extensions:
     Behat\MinkExtension:
-      base_url: 'http://127.0.0.1:8081'
-      sessions:
-        symfony:
-          browserkit_http: ~
-        selenium2:
-          selenium2:
-            wd_host: 'http://127.0.0.1:4444/wd/hub'
-            browser: chrome
-            capabilities:
-              acceptSslCerts: true
-              chrome:
-                switches:
-                  - "--headless=new"
-                  - "--disable-gpu"
-                  - "--no-sandbox"
-                  - "--window-size=1920,1080"
+      base_url: 'http://web'
+      javascript_session: selenium2
+      selenium2:
+        browser: chrome
+        wd_host: http://selenium:4444/wd/hub
+        capabilities:
+          extra_capabilities:
+            idle-timeout: 50
+            chrome:
+              switches:
+                - "--headless=new"
+                - "--disable-gpu"
+                - "--no-sandbox"
+                - "--window-size=1920,1080"
