@@ -62,13 +62,13 @@ ddev:
 ci:
   extensions:
     Behat\MinkExtension:
-      base_url: 'http://web'
+      base_url: 'http://127.0.0.1:8081'
       sessions:
         symfony:
           browserkit_http: ~
         selenium2:
           selenium2:
-            wd_host: 'http://selenium:4444/wd/hub'
+            wd_host: 'http://127.0.0.1:4444/wd/hub'
             browser: chrome
             capabilities:
               acceptSslCerts: true
