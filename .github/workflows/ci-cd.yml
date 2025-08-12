@@ -142,83 +142,83 @@ jobs:
           set -e
           cp web/sites/default/default.settings.php web/sites/default/settings.php
           cat >> web/sites/default/settings.php <<'PHP'
-  $databases['default']['default'] = [
-  'driver' => 'mysql',
-  'database' => 'ci_crypto',
-  'username' => 'root',
-  'password' => 'root',
-  'host' => '127.0.0.1',
-  'port' => '3306',
-  'prefix' => '',
-  'namespace' => 'Drupal\\mysql\\Driver\\Database\\mysql',
-  'collation' => 'utf8mb4_general_ci',
-];
-  $settings['hash_salt'] = 'ci-auto-generated-salt';
-  PHP
-  mkdir -p web/sites/default/files
-  chmod -R 777 web/sites/default/files
+          $databases['default']['default'] = [
+            'driver' => 'mysql',
+            'database' => 'ci_crypto',
+            'username' => 'root',
+            'password' => 'root',
+            'host' => '127.0.0.1',
+            'port' => '3306',
+            'prefix' => '',
+            'namespace' => 'Drupal\\mysql\\Driver\\Database\\mysql',
+            'collation' => 'utf8mb4_general_ci',
+          ];
+          $settings['hash_salt'] = 'ci-auto-generated-salt';
+          PHP
+          mkdir -p web/sites/default/files
+          chmod -R 777 web/sites/default/files
 
-- name: Install Drupal (MySQL) via Drush
-  working-directory: web
-  run: |
-    set -e
-    ../vendor/bin/drush si minimal -y --db-url=mysql://root:root@127.0.0.1:3306/ci_crypto --site-name="CI Crypto" --account-name=admin --account-pass=admin
-    ../vendor/bin/drush cr
-    ../vendor/bin/drush cset system.site page.front /user/login -y
-    ../vendor/bin/drush cr
-    ../vendor/bin/drush status
+      - name: Install Drupal (MySQL) via Drush
+        working-directory: web
+        run: |
+          set -e
+          ../vendor/bin/drush si minimal -y --db-url=mysql://root:root@127.0.0.1:3306/ci_crypto --site-name="CI Crypto" --account-name=admin --account-pass=admin
+          ../vendor/bin/drush cr
+          ../vendor/bin/drush cset system.site page.front /user/login -y
+          ../vendor/bin/drush cr
+          ../vendor/bin/drush status
 
-- name: Start PHP built-in server (Drupal router)
-  run: |
-    nohup php -d display_errors=1 -S 127.0.0.1:8081 -t web web/core/scripts/router.php >/dev/null 2>&1 &
-    for i in {1..60}; do
-      CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/user/login || true)
-      if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
-        echo "/user/login HTTP $CODE"; break
-      fi
-      echo "Waiting /user/login (HTTP ${CODE:-none})... ($i/60)"; sleep 2
-    done
-    for i in {1..60}; do
-      CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/ || true)
-      if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
-        echo "/ HTTP $CODE"; break
-      fi
-      echo "Waiting / (HTTP ${CODE:-none})... ($i/60)"; sleep 2
-    done
+      - name: Start PHP built-in server (Drupal router)
+        run: |
+          nohup php -d display_errors=1 -S 127.0.0.1:8081 -t web web/core/scripts/router.php >/dev/null 2>&1 &
+          for i in {1..60}; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/user/login || true)
+            if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+              echo "/user/login HTTP $CODE"; break
+            fi
+            echo "Waiting /user/login (HTTP ${CODE:-none})... ($i/60)"; sleep 2
+          done
+          for i in {1..60}; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/ || true)
+            if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+              echo "/ HTTP $CODE"; break
+            fi
+            echo "Waiting / (HTTP ${CODE:-none})... ($i/60)"; sleep 2
+          done
 
-- name: Verify Selenium health
-  run: |
-    for i in {1..120}; do
-      if curl -fsS http://127.0.0.1:4444/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true"; then
-        echo "Selenium ready via /status"; exit 0
-      fi
-      if curl -fsS http://127.0.0.1:4444/wd/hub/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true"; then
-        echo "Selenium ready via /wd/hub/status"; exit 0
-      fi
-      echo "Waiting Selenium... ($i/120)"; sleep 2
-    done
-    echo "Selenium did not become ready in time."; exit 1
+      - name: Verify Selenium health
+        run: |
+          for i in {1..120}; do
+            if curl -fsS http://127.0.0.1:4444/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true"; then
+              echo "Selenium ready via /status"; exit 0
+            fi
+            if curl -fsS http://127.0.0.1:4444/wd/hub/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true"; then
+              echo "Selenium ready via /wd/hub/status"; exit 0
+            fi
+            echo "Waiting Selenium... ($i/120)"; sleep 2
+          done
+          echo "Selenium did not become ready in time."; exit 1
 
-- name: Verify FeatureContext autoload
-  run: |
-    php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
+      - name: Verify FeatureContext autoload
+        run: |
+          php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
-- name: Run Behat (profile ci)
-  run: |
-    timeout 15m vendor/bin/behat -c behat.yml -p ci --colors --strict -vvv
+      - name: Run Behat (profile ci)
+        run: |
+          timeout 15m vendor/bin/behat -c behat.yml -p ci --colors --strict -vvv
 
-- name: Dump diagnostics on failure
-  if: failure()
-  working-directory: web
-  run: |
-    echo "=== Recent Drupal watchdog (errors) ==="
-    ../vendor/bin/drush ws --severity=Error --count=50 || true
-    echo "=== PHP server probe / ==="
-    curl -si http://127.0.0.1:8081/ || true
-    echo "=== PHP server probe /user/login ==="
-    curl -si http://127.0.0.1:8081/user/login || true
-    echo "=== Selenium logs ==="
-    docker logs ${{ job.services.selenium.id }} || true
+      - name: Dump diagnostics on failure
+        if: failure()
+        working-directory: web
+        run: |
+          echo "=== Recent Drupal watchdog (errors) ==="
+          ../vendor/bin/drush ws --severity=Error --count=50 || true
+          echo "=== PHP server probe / ==="
+          curl -si http://127.0.0.1:8081/ || true
+          echo "=== PHP server probe /user/login ==="
+          curl -si http://127.0.0.1:8081/user/login || true
+          echo "=== Selenium logs ==="
+          docker logs ${{ job.services.selenium.id }} || true
 
 deploy:
   name: Déploiement (à adapter selon l’environnement)
