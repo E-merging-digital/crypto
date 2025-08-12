@@ -138,7 +138,7 @@ jobs:
         run: |
           nohup php -S 127.0.0.1:8081 -t web web/index.php >/dev/null 2>&1 &
           for i in {1..60}; do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/ || true)
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/core/assets/vendor/jquery/jquery.min.js || true)
             if [ -n "$CODE" ] && [ "$CODE" -ge 200 ] && [ "$CODE" -lt 500 ]; then
               echo "Local server HTTP $CODE"; break
             fi
@@ -147,8 +147,9 @@ jobs:
 
       - name: Launch Selenium (detached)
         run: |
+          docker rm -f selenium >/dev/null 2>&1 || true
           docker pull selenium/standalone-chrome:4.30.0
-          docker run -d --name selenium -p 4444:4444 --shm-size=2g selenium/standalone-chrome:4.30.0
+          docker run -d --name selenium --shm-size=2g -p 4444:4444 selenium/standalone-chrome:4.30.0
           for i in {1..120}; do
             if curl -fsS http://127.0.0.1:4444/status | grep -q '"ready":\s*true'; then
               echo "Selenium ready via /status"; break
@@ -164,9 +165,10 @@ jobs:
           php -r 'require "vendor/autoload.php"; echo (class_exists("App\\Tests\\Behat\\FeatureContext") ? "OK": "MISSING"), PHP_EOL;'
 
       - name: Run Behat (profil CI)
-        env:
-          BEHAT_PARAMS: '{"extensions":{"Behat\\MinkExtension":{"base_url":"http://127.0.0.1:8081","selenium2":{"wd_host":"http://127.0.0.1:4444/wd/hub"}}}}'
-        run: vendor/bin/behat -c behat.yml -p ci --colors --strict
+        run: |
+          # IMPORTANT : on s’appuie sur le profil "ci" de behat.yml (base_url=127.0.0.1:8081),
+          # pas de BEHAT_PARAMS contradictoire pour éviter les timeouts.
+          timeout 15m vendor/bin/behat -c behat.yml -p ci --colors --strict -vvv
 
       - name: Dump Selenium logs on failure
         if: failure()
