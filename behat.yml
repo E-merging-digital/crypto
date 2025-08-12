@@ -10,12 +10,11 @@ default:
 
   extensions:
     Behat\MinkExtension:
-      # Non-JS par défaut (rapide, expose les codes HTTP)
+      # Session par défaut rapide (BrowserKit) + session JS via Selenium
       default_session: symfony
-      # JS via Selenium quand un scénario est tagué @javascript
       javascript_session: selenium2
 
-      # Utile uniquement pour Selenium ; ignoré par BrowserKit.
+      # Valeur par défaut pour l'exécution en conteneur (DDEV/compose)
       base_url: 'http://web'
 
       sessions:
@@ -62,17 +61,21 @@ ddev:
 ci:
   extensions:
     Behat\MinkExtension:
-      base_url: 'http://web'
-      javascript_session: selenium2
-      selenium2:
-        browser: chrome
-        wd_host: http://selenium:4444/wd/hub
-        capabilities:
-          extra_capabilities:
-            idle-timeout: 50
-            chrome:
-              switches:
-                - "--headless=new"
-                - "--disable-gpu"
-                - "--no-sandbox"
-                - "--window-size=1920,1080"
+      # CI GitHub: serveur PHP intégré exposé en local
+      base_url: 'http://127.0.0.1:8081'
+      sessions:
+        symfony:
+          browserkit_http: ~
+        selenium2:
+          selenium2:
+            # Selenium lancé sur le runner (pas de service "web" en réseau docker-compose)
+            wd_host: 'http://127.0.0.1:4444/wd/hub'
+            browser: chrome
+            capabilities:
+              acceptSslCerts: true
+              chrome:
+                switches:
+                  - "--headless=new"
+                  - "--disable-gpu"
+                  - "--no-sandbox"
+                  - "--window-size=1920,1080"
