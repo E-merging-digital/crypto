@@ -220,43 +220,43 @@ jobs:
           echo "=== Selenium logs ==="
           docker logs ${{ job.services.selenium.id }} || true
 
-deploy:
-  name: Déploiement (à adapter selon l’environnement)
-  runs-on: ubuntu-latest
-  needs: [phpunit-and-lint, behat]
-  if: github.ref == 'refs/heads/main'
-  steps:
-    - uses: actions/checkout@v4
+  deploy:
+    name: Déploiement (à adapter selon l’environnement)
+    runs-on: ubuntu-latest
+    needs: [phpunit-and-lint, behat]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Set up SSH for private deploy
-      uses: webfactory/ssh-agent@v0.9.0
-      with:
-        ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+      - name: Set up SSH for private deploy
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-    - name: PHP & Composer
-      uses: shivammathur/setup-php@v2
-      with:
-        php-version: '8.3'
-        tools: composer
+      - name: PHP & Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
 
-    - name: Composer install for deploy (no dev)
-      run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+      - name: Composer install for deploy (no dev)
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
 
-    - name: Build theme assets (si thème custom existe)
-      working-directory: web/themes/custom
-      run: |
-        if [ -f package.json ]; then npm ci && npm run build; else echo "No theme build"; fi
+      - name: Build theme assets (si thème custom existe)
+        working-directory: web/themes/custom
+        run: |
+          if [ -f package.json ]; then npm ci && npm run build; else echo "No theme build"; fi
 
-    - name: Push sur le repo de production
-      run: |
-        git config --global user.email "github-actions@github.com"
-        git config --global user.name "GitHub CI"
-        git remote add production ${{ secrets.PRODUCTION_SSH_REPO }}
-        git push production main:main --force-with-lease
+      - name: Push sur le repo de production
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub CI"
+          git remote add production ${{ secrets.PRODUCTION_SSH_REPO }}
+          git push production main:main --force-with-lease
 
-    - name: Run Drush post-deploy
-      env:
-        PROD_SSH: ${{ secrets.PROD_SSH }}
-      run: |
-        ssh -o StrictHostKeyChecking=no "$PROD_SSH" \
-          "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
+      - name: Run Drush post-deploy
+        env:
+          PROD_SSH: ${{ secrets.PROD_SSH }}
+        run: |
+          ssh -o StrictHostKeyChecking=no "$PROD_SSH" \
+            "cd web && vendor/bin/drush cim -y && vendor/bin/drush updb -y && vendor/bin/drush cr"
