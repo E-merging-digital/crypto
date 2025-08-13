@@ -5,13 +5,13 @@ grumphp:
     enabled: true
 
   tasks:
-    # Composer validate + PHPUnit (Unit) rapides au pré-commit
+    # ✅ Composer validate + PHPUnit (Unit) en pré-commit via shell
     shell:
       scripts:
         - ['composer', 'validate', '--strict', '--no-check-publish', '--no-interaction']
         - ['bash', '-lc', 'test -x ./vendor/bin/phpunit && ./vendor/bin/phpunit --testsuite Unit || echo "PHPUnit not installed, skipping Unit suite."']
 
-    # PHPCS (standards définis dans phpcs.xml.dist)
+    # ✅ PHPCS (Drupal standards via phpcs.xml.dist)
     phpcs:
       standard: 'phpcs.xml.dist'
       ignore_patterns:
@@ -21,27 +21,32 @@ grumphp:
         - '/web/themes/contrib/*'
       triggered_by: [php, module, inc, install, profile, theme, engine]
 
-    # PHPStan
+    # ✅ PHPStan
     phpstan:
       configuration: 'phpstan.neon'
       memory_limit: '-1'
 
-    # PHPUnit complet (appelé dans la testsuite pre-push)
+    # ✅ PHPUnit complet (appelé par la testsuite pre-push)
     phpunit:
       config_file: 'phpunit.xml.dist'
       always_execute: true
 
-    # TwigCS — utiliser "ruleset" (pas "config")
+    # ✅ TwigCS — utiliser "ruleset" (et non "config")
     twigcs:
       ruleset: 'official'
+      triggered_by: [twig]
+      # (optionnel) vous pouvez préciser un chemin racine :
+      # path: 'web'
 
-    # JSON/XML lint — pas de "triggered_by" dans ta version de GrumPHP
+    # ✅ Lint JSON & XML
     jsonlint:
       detect_key_conflicts: true
+      triggered_by: [json]
       ignore_patterns:
         - '/vendor/*'
 
     xmllint:
+      triggered_by: [xml]
       ignore_patterns:
         - '/vendor/*'
 
