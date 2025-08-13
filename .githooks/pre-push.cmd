@@ -1,9 +1,23 @@
 @echo off
 setlocal
-where bash >nul 2>nul
-if errorlevel 1 (
-  echo [pre-push] Bash introuvable. Lancez le push depuis "Git Bash".
-  exit /b 1
+where ddev >NUL 2>&1
+if %ERRORLEVEL%==0 (
+  ddev exec -- ./vendor/bin/grumphp run --testsuite pre-push
+  set EXITCODE=%ERRORLEVEL%
+  if not %EXITCODE%==0 ( endlocal & exit /b %EXITCODE% )
+  if exist behat.yml (
+    ddev exec -- ./vendor/bin/behat -c behat.yml -p local --colors --strict
+    set EXITCODE=%ERRORLEVEL%
+    endlocal & exit /b %EXITCODE%
+  )
+) else (
+  bash -lc "./vendor/bin/grumphp run --testsuite pre-push"
+  set EXITCODE=%ERRORLEVEL%
+  if not %EXITCODE%==0 ( endlocal & exit /b %EXITCODE% )
+  if exist behat.yml (
+    bash -lc "./vendor/bin/behat -c behat.yml -p local --colors --strict"
+    set EXITCODE=%ERRORLEVEL%
+    endlocal & exit /b %EXITCODE%
+  )
 )
-bash -lc "exec ./.githooks/pre-push"
-endlocal
+endlocal & exit /b 0

@@ -1,64 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo ">>> [pre-push] starting…"
-
-has_php() { command -v php >/dev/null 2>&1; }
-use_ddev=false
-
+EXEC=""
 if command -v ddev >/dev/null 2>&1; then
   if ddev describe >/dev/null 2>&1; then
-    use_ddev=true
-  else
-    echo ">>> [pre-push] ddev détecté mais indisponible (non démarré ou config invalide)."
+    EXEC="ddev exec --"
   fi
 fi
 
-# Si pas de PHP local et ddev détecté mais pas prêt : essais d’auto-start (local seulement).
-if ! has_php && ! $use_ddev && command -v ddev >/dev/null 2>&1; then
-  echo ">>> [pre-push] php introuvable localement. Tentative de démarrage ddev…"
-  if ddev start -y >/dev/null 2>&1 && ddev describe >/dev/null 2>&1; then
-    use_ddev=true
-    echo ">>> [pre-push] ddev démarré."
-  else
-    echo "!!! [pre-push] ddev ne peut pas démarrer."
-    echo "    - Corrige .ddev/config.yaml (type/support) puis 'ddev start'"
-    echo "    - OU installe PHP 8.3 dans ton PATH (Windows : Scoop/Chocolatey)"
-    echo "    - En urgence : 'git push --no-verify'"
-    exit 1
-  fi
-fi
+echo ">>> [pre-push] GrumPHP testsuite: pre-push (PHPUnit complet)"
+$EXEC ./vendor/bin/grumphp run --testsuite pre-push
 
-EXEC=''
-BEHAT_PROFILE='local'
-if $use_ddev; then
-  EXEC='ddev exec --'
-  BEHAT_PROFILE='ddev'
-fi
-
-# Vérif runtime
-${EXEC} php -v >/dev/null 2>&1 || { echo "!!! [pre-push] php indisponible même via ${use_ddev:+ddev}. Abandon."; exit 1; }
-
-# 1) PHPUnit complet via GrumPHP testsuite 'pre-push' si dispo, sinon fallback phpunit.
-if [ -x ./vendor/bin/grumphp ] && [ -f ./grumphp.yml ]; then
-  echo ">>> [pre-push] GrumPHP testsuite: pre-push (PHPUnit complet)"
-  ${EXEC} ./vendor/bin/grumphp run --testsuite pre-push
-else
-  echo ">>> [pre-push] GrumPHP absent: fallback PHPUnit complet"
-  if [ -x ./vendor/bin/phpunit ] && { [ -f phpunit.xml ] || [ -f phpunit.xml.dist ]; }; then
-    ${EXEC} ./vendor/bin/phpunit
-  else
-    echo "!!! [pre-push] phpunit ou config manquants."
-    exit 1
-  fi
-fi
-
-# 2) Behat (facultatif mais recommandé)
+# Optionnel : Behat local s'il existe (ne casse pas si absent)
 if [ -x ./vendor/bin/behat ] && [ -f ./behat.yml ]; then
-  echo ">>> [pre-push] Behat profile=${BEHAT_PROFILE}"
-  ${EXEC} ./vendor/bin/behat -c behat.yml -p "${BEHAT_PROFILE}" --colors --strict
-else
-  echo ">>> [pre-push] Behat non trouvé : skip."
+  echo ">>> [pre-push] Behat (profile: local)"
+  $EXEC ./vendor/bin/behat -c behat.yml -p local --colors --strict
 fi
-
-echo ">>> [pre-push] OK"

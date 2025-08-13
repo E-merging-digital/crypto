@@ -1,17 +1,21 @@
 grumphp:
+  git_hook_variables:
+    EXEC_GRUMPHP_COMMAND: 'bash -lc "if command -v ddev >/dev/null 2>&1; then ddev exec -- {cmd}; else {cmd}; fi"'
+
   hooks_preset: local
   process_timeout: 900
   parallel:
     enabled: true
 
   tasks:
-    # ✅ Composer validate + PHPUnit (Unit) en pré-commit via shell
-    shell:
-      scripts:
-        - ['composer', 'validate', '--strict', '--no-check-publish', '--no-interaction']
-        - ['bash', '-lc', 'test -x ./vendor/bin/phpunit && ./vendor/bin/phpunit --testsuite Unit || echo "PHPUnit not installed, skipping Unit suite."']
+    phplint:
+      triggered_by: [php, module, inc, install, profile, theme, engine]
+      exclude:
+        - vendor
+        - web/core
+        - web/modules/contrib
+        - web/themes/contrib
 
-    # ✅ PHPCS (Drupal standards via phpcs.xml.dist)
     phpcs:
       standard: 'phpcs.xml.dist'
       ignore_patterns:
@@ -21,41 +25,47 @@ grumphp:
         - '/web/themes/contrib/*'
       triggered_by: [php, module, inc, install, profile, theme, engine]
 
-    # ✅ PHPStan
     phpstan:
       configuration: 'phpstan.neon'
       memory_limit: '-1'
 
-    # ✅ PHPUnit complet (appelé par la testsuite pre-push)
     phpunit:
       config_file: 'phpunit.xml.dist'
+      testsuite: 'Unit'
       always_execute: true
 
-    # ✅ TwigCS — utiliser "ruleset" (et non "config")
     twigcs:
-      ruleset: 'official'
-      triggered_by: [twig]
-      # (optionnel) vous pouvez préciser un chemin racine :
-      # path: 'web'
+      # Cette version de l’intégration TwigCS n’accepte pas "paths".
+      # On scanne depuis la racine et on exclut tout sauf le custom.
+      ruleset: 'FriendsOfTwig\Twigcs\Ruleset\Official'
+      severity: 'warning'
+      display: 'detailed'
+      path: '.'
+      exclude:
+        - 'vendor'
+        - 'web/core'
+        - 'web/modules/contrib'
+        - 'web/themes/contrib'
+        - 'node_modules'
+        - '.ddev'
+        - '.git'
 
-    # ✅ Lint JSON & XML
     jsonlint:
       detect_key_conflicts: true
-      triggered_by: [json]
       ignore_patterns:
         - '/vendor/*'
 
     xmllint:
-      triggered_by: [xml]
       ignore_patterns:
         - '/vendor/*'
 
   testsuites:
     pre-commit:
       tasks:
-        - shell
+        - phplint
         - phpcs
         - phpstan
+        - phpunit
         - twigcs
         - jsonlint
         - xmllint

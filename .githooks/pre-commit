@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Exécute dans DDEV si dispo et démarré, sinon local
+EXEC=""
+if command -v ddev >/dev/null 2>&1; then
+  if ddev describe >/dev/null 2>&1; then
+    EXEC="ddev exec --"
+  fi
+fi
+
+echo ">>> [pre-commit] GrumPHP testsuite: pre-commit"
+$EXEC ./vendor/bin/grumphp run --testsuite pre-commit
