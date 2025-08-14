@@ -1,18 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXEC=""
-if command -v ddev >/dev/null 2>&1; then
-  if ddev describe >/dev/null 2>&1; then
-    EXEC="ddev exec --"
-  fi
-fi
-
 echo ">>> [pre-push] GrumPHP testsuite: pre-push (PHPUnit complet)"
-$EXEC ./vendor/bin/grumphp run --testsuite pre-push
+./vendor/bin/grumphp run --testsuite pre-push
 
-# Optionnel : Behat local s'il existe (ne casse pas si absent)
-if [ -x ./vendor/bin/behat ] && [ -f ./behat.yml ]; then
-  echo ">>> [pre-push] Behat (profile: local)"
-  $EXEC ./vendor/bin/behat -c behat.yml -p local --colors --strict
+# ---- Behat : on exige DDEV en local pour exécuter la batterie lourde.
+if ! command -v ddev >/dev/null 2>&1; then
+  echo ">>> [pre-push] ddev non trouvé dans le PATH. Installez DDEV ou démarrez-le avant le push."
+  exit 1
 fi
+
+# ddev describe renvoie 0 si le projet est démarré
+if ! ddev describe >/dev/null 2>&1; then
+  echo ">>> [pre-push] ddev n'est pas démarré. Lancez 'ddev start' puis re-poussez."
+  exit 1
+fi
+
+# Vérifier que Selenium du projet ddev est prêt
+echo ">>> [pre-push] Vérification Selenium (service ddev 'selenium')…"
+if ! ddev exec bash -lc 'for i in {1..60}; do curl -fsS http://selenium:4444/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true" && exit 0; sleep 1; done; exit 1'; then
+  echo ">>> [pre-push] Selenium n'est pas prêt dans ddev. Démarrez/attendez selenium puis re-poussez."
+  exit 1
+fi
+
+echo ">>> [pre-push] Behat (profil: ddev)"
+# On exécute Behat *dans* le conteneur web (réseau ddev OK, base_url=http://web)
+ddev exec -- ./vendor/bin/behat -c behat.yml -p ddev --colors --strict

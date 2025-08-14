@@ -1,23 +1,9 @@
 @echo off
-setlocal
-where ddev >NUL 2>&1
-if %ERRORLEVEL%==0 (
-  ddev exec -- ./vendor/bin/grumphp run --testsuite pre-push
-  set EXITCODE=%ERRORLEVEL%
-  if not %EXITCODE%==0 ( endlocal & exit /b %EXITCODE% )
-  if exist behat.yml (
-    ddev exec -- ./vendor/bin/behat -c behat.yml -p local --colors --strict
-    set EXITCODE=%ERRORLEVEL%
-    endlocal & exit /b %EXITCODE%
-  )
-) else (
-  bash -lc "./vendor/bin/grumphp run --testsuite pre-push"
-  set EXITCODE=%ERRORLEVEL%
-  if not %EXITCODE%==0 ( endlocal & exit /b %EXITCODE% )
-  if exist behat.yml (
-    bash -lc "./vendor/bin/behat -c behat.yml -p local --colors --strict"
-    set EXITCODE=%ERRORLEVEL%
-    endlocal & exit /b %EXITCODE%
-  )
+REM Lance le hook bash depuis Git Bash si présent (Windows)
+where bash >NUL 2>&1
+if errorlevel 1 (
+  echo [pre-push.cmd] "bash" introuvable. Installez Git for Windows (avec Git Bash).
+  exit /b 1
 )
-endlocal & exit /b 0
+bash -lc ".githooks/pre-push"
+exit /b %ERRORLEVEL%
