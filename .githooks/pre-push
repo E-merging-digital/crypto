@@ -3,7 +3,7 @@ set -euo pipefail
 
 echo ">>> [pre-push] starting…"
 
-# 1) Exiger DDEV démarré (on exécute tout dedans)
+# 1) Tout doit tourner dans DDEV
 if ! command -v ddev >/dev/null 2>&1; then
   echo ">>> [pre-push] ddev introuvable. Installez DDEV et lancez 'ddev start'." >&2
   exit 1
@@ -13,14 +13,35 @@ if ! ddev describe >/dev/null 2>&1; then
   exit 1
 fi
 
-# 2) PHPUnit complet via GrumPHP (testsuite pre-push) - DANS DDEV
+# 2) PHPUnit complet via GrumPHP (testsuite pre-push)
 echo ">>> [pre-push] GrumPHP testsuite: pre-push (PHPUnit complet)"
 ddev exec -- ./vendor/bin/grumphp run --testsuite pre-push
 
-# 3) Vérifier que Selenium (service ddev 'selenium') est prêt
+# 3) Vérifier la santé de Selenium (service 'selenium' ddev)
 echo ">>> [pre-push] Vérification Selenium (service ddev 'selenium')…"
-ddev exec -- bash -lc 'for i in {1..60}; do curl -fsS http://selenium:4444/status | grep -q "\"ready\"[[:space:]]*:[[:space:]]*true" && exit 0; sleep 1; done; exit 1'
+ddev exec -- bash -s <<'BASH'
+set -e
+for i in $(seq 1 120); do
+  RESP="$(curl -fsS http://selenium:4444/status || true)"
+  CLEAN="$(printf '%s' "$RESP" | tr -d '[:space:]')"
+  if printf '%s\n' "$CLEAN" | grep -q '"ready":true'; then
+    echo "Selenium ready via /status"
+    exit 0
+  fi
 
-# 4) Behat dans DDEV avec le profil 'ddev' (base_url=http://web)
+  RESP="$(curl -fsS http://selenium:4444/wd/hub/status || true)"
+  CLEAN="$(printf '%s' "$RESP" | tr -d '[:space:]')"
+  if printf '%s\n' "$CLEAN" | grep -q '"ready":true'; then
+    echo "Selenium ready via /wd/hub/status"
+    exit 0
+  fi
+
+  sleep 1
+done
+echo "Selenium did not become ready in time." >&2
+exit 1
+BASH
+
+# 4) Behat en profil DDEV (base_url=http://web)
 echo ">>> [pre-push] Behat (profil: ddev)"
 ddev exec -- ./vendor/bin/behat -c behat.yml -p ddev --colors --strict
